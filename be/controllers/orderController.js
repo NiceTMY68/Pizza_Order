@@ -113,10 +113,10 @@ const createOrder = async (req, res) => {
     });
 
     if (table.status === 'available') {
-      await Table.findByIdAndUpdate(tableId, {
-        status: 'occupied',
-        currentOrderId: order._id
-      });
+    await Table.findByIdAndUpdate(tableId, {
+      status: 'occupied',
+      currentOrderId: order._id
+    });
     } else if (table.status === 'occupied' && !table.currentOrderId) {
       await Table.findByIdAndUpdate(tableId, {
         currentOrderId: order._id
@@ -248,7 +248,10 @@ const deleteOrder = async (req, res) => {
 
 const getOrdersByTable = async (req, res) => {
   try {
-    const orders = await Order.find({ tableId: req.params.tableId })
+    const orders = await Order.find({ 
+      tableId: req.params.tableId,
+      status: { $nin: ['paid', 'cancelled'] }
+    })
       .populate('supervisorId', 'name username')
       .sort({ createdAt: -1 });
 

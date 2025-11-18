@@ -60,9 +60,11 @@ const processPayment = async (req, res) => {
 
     const table = await Table.findById(order.tableId);
     if (table && table.currentOrderId && table.currentOrderId.toString() === order._id.toString()) {
-      await Table.findByIdAndUpdate(order.tableId, {
-        currentOrderId: null
-      });
+      const updateData = { currentOrderId: null };
+      if (table.status === 'occupied') {
+        updateData.status = 'available';
+      }
+      await Table.findByIdAndUpdate(order.tableId, updateData);
     }
 
     const updatedOrder = await populateOrder(order);
