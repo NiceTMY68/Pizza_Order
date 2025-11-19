@@ -101,10 +101,23 @@ orderSchema.methods.calculateTotal = function() {
 };
 
 orderSchema.statics.generateOrderNumber = async function() {
-  const count = await this.countDocuments();
   const date = new Date();
   const dateStr = date.toISOString().slice(0, 10).replace(/-/g, '');
-  return `ORD-${dateStr}-${String(count + 1).padStart(4, '0')}`;
+  const prefix = `ORD-${dateStr}-`;
+  
+  const lastOrder = await this.findOne({
+    orderNumber: { $regex: `^${prefix}` }
+  }).sort({ orderNumber: -1 }).select('orderNumber');
+  
+  let sequence = 1;
+  if (lastOrder && lastOrder.orderNumber) {
+    const lastSequence = parseInt(lastOrder.orderNumber.replace(prefix, ''));
+    if (!isNaN(lastSequence)) {
+      sequence = lastSequence + 1;
+    }
+  }
+  
+  return `${prefix}${String(sequence).padStart(4, '0')}`;
 };
 
 module.exports = mongoose.model('Order', orderSchema);

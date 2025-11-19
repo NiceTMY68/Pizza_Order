@@ -94,14 +94,23 @@ const Order = () => {
       }
       return null;
     } catch (error) {
-      if (error.message && error.message.includes('unpaid order')) {
+      const errorMessage = error.response?.data?.message || error.message || 'Failed to create order';
+      
+      if (errorMessage.includes('unpaid order') || errorMessage.includes('active order')) {
         const existingOrder = await fetchOrder();
         if (existingOrder) {
           toast.warning('Table has an unpaid order. Loading existing order...');
           return existingOrder;
         }
       }
-      toast.error(error.message || 'Failed to create order');
+      
+      if (error.response?.data?.data) {
+        setOrder(error.response.data.data);
+        toast.warning(errorMessage);
+        return error.response.data.data;
+      }
+      
+      toast.error(errorMessage);
       return null;
     }
   };

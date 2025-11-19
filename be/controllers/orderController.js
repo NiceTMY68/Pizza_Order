@@ -74,7 +74,22 @@ const getOrderById = async (req, res) => {
 
 const createOrder = async (req, res) => {
   try {
+    if (!req.supervisor || !req.supervisor._id) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+    }
+
     const { tableId, notes } = req.body;
+    
+    if (!tableId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Table ID is required'
+      });
+    }
+
     const table = await Table.findById(tableId);
 
     if (!table) {
@@ -102,28 +117,54 @@ const createOrder = async (req, res) => {
       }
     }
 
-    const orderNumber = await Order.generateOrderNumber();
-    const order = await Order.create({
-      orderNumber,
-      tableId,
-      supervisorId: req.supervisor._id,
-      notes: notes || '',
-      items: [],
-      status: 'draft'
-    });
+    let order;
+    let retryCount = 0;
+    const maxRetries = 3;
+    
+    while (retryCount < maxRetries) {
+      try {
+        const orderNumber = await Order.generateOrderNumber();
+        const orderData = {
+          orderNumber,
+          tableId,
+          supervisorId: req.supervisor._id,
+          notes: notes || '',
+          items: [],
+          status: 'draft'
+        };
+
+        order = await Order.create(orderData);
+        break;
+      } catch (createError) {
+        if (createError.code === 11000 && createError.keyPattern && createError.keyPattern.orderNumber) {
+          retryCount++;
+          if (retryCount >= maxRetries) {
+            throw createError;
+          }
+          await new Promise(resolve => setTimeout(resolve, 100 * retryCount));
+        } else {
+          throw createError;
+        }
+      }
+    }
 
     if (table.status === 'available') {
-    await Table.findByIdAndUpdate(tableId, {
-      status: 'occupied',
-      currentOrderId: order._id
-    });
+      await Table.findByIdAndUpdate(tableId, {
+        status: 'occupied',
+        currentOrderId: order._id
+      });
     } else if (table.status === 'occupied' && !table.currentOrderId) {
       await Table.findByIdAndUpdate(tableId, {
         currentOrderId: order._id
       });
     }
 
-    const populatedOrder = await populateOrder(order);
+    let populatedOrder;
+    try {
+      populatedOrder = await populateOrder(order);
+    } catch (populateError) {
+      populatedOrder = order;
+    }
 
     res.status(201).json({
       success: true,
