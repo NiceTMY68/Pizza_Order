@@ -31,10 +31,18 @@ const orderItemSchema = new mongoose.Schema({
   },
   kitchenStatus: {
     type: String,
-    enum: ['pending', 'sent', 'cooking', 'ready'],
+    enum: ['pending', 'sent', 'cooking', 'ready', 'declined'],
     default: 'pending'
   },
   sentToKitchenAt: {
+    type: Date,
+    default: null
+  },
+  readyAt: {
+    type: Date,
+    default: null
+  },
+  declinedAt: {
     type: Date,
     default: null
   }

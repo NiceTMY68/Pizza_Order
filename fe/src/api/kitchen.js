@@ -12,5 +12,9 @@ export const kitchenAPI = {
   getPending: async () => {
     return await apiClient.get('/kitchen/pending');
   },
+
+  updateItemStatus: async (orderId, itemId, status) => {
+    return await apiClient.patch(`/kitchen/orders/${orderId}/items/${itemId}/status`, { status });
+  }
 };
 

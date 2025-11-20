@@ -467,7 +467,6 @@ const cleanupEmptyOrder = async (orderId, tableId) => {
     }
     return false;
   } catch (error) {
-    console.error('Error cleaning up empty order:', error);
     return false;
   }
 };
@@ -502,6 +501,13 @@ const deleteOrderItem = async (req, res) => {
       return res.status(404).json({
         success: false,
         message: 'Item not found in order'
+      });
+    }
+
+    if (item.kitchenStatus && item.kitchenStatus !== 'pending') {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot delete items that have been sent to kitchen'
       });
     }
 

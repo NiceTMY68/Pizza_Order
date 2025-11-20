@@ -7,6 +7,17 @@ const populateOrder = (order) => {
     .populate('items.menuItemId', 'name category price');
 };
 
+const updateOrderStatusFromItems = (order) => {
+  const activeStatuses = ['pending', 'sent', 'cooking'];
+  const hasActiveItems = order.items.some(item => activeStatuses.includes(item.kitchenStatus));
+
+  if (!hasActiveItems) {
+    order.status = 'completed';
+  } else if (order.status === 'sent_to_kitchen' && order.items.some(item => item.kitchenStatus === 'cooking')) {
+    order.status = 'cooking';
+  }
+};
+
 const sendToKitchen = async (req, res) => {
   try {
     const order = await Order.findById(req.params.id);
@@ -123,7 +134,7 @@ const getPendingItems = async (req, res) => {
     const pendingItems = [];
     orders.forEach(order => {
       order.items.forEach(item => {
-        if (item.kitchenStatus !== 'ready') {
+        if (!['ready', 'declined'].includes(item.kitchenStatus)) {
           pendingItems.push({
             orderId: order._id,
             orderNumber: order.orderNumber,
@@ -135,11 +146,19 @@ const getPendingItems = async (req, res) => {
               quantity: item.quantity,
               note: item.note,
               status: item.kitchenStatus,
-              sentAt: item.sentToKitchenAt
+              sentAt: item.sentToKitchenAt,
+              menuItemId: item.menuItemId?._id || item.menuItemId,
+              category: item.menuItemId?.category || null
             }
           });
         }
       });
+    });
+
+    pendingItems.sort((a, b) => {
+      const timeA = a.item.sentAt ? new Date(a.item.sentAt).getTime() : 0;
+      const timeB = b.item.sentAt ? new Date(b.item.sentAt).getTime() : 0;
+      return timeA - timeB;
     });
 
     res.status(200).json({
@@ -156,8 +175,71 @@ const getPendingItems = async (req, res) => {
   }
 };
 
+const updateItemStatus = async (req, res) => {
+  try {
+    const { orderId, itemId } = req.params;
+    const { status } = req.body || {};
+    const allowedStatuses = ['ready', 'declined'];
+
+    if (!allowedStatuses.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid status'
+      });
+    }
+
+    const order = await Order.findById(orderId);
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: 'Order not found'
+      });
+    }
+
+    const item = order.items.id(itemId);
+
+    if (!item) {
+      return res.status(404).json({
+        success: false,
+        message: 'Order item not found'
+      });
+    }
+
+    if (item.kitchenStatus === status) {
+      return res.status(200).json({
+        success: true,
+        message: `Item already marked as ${status}`
+      });
+    }
+
+    item.kitchenStatus = status;
+
+    if (status === 'ready') {
+      item.readyAt = new Date();
+    } else if (status === 'declined') {
+      item.declinedAt = new Date();
+    }
+
+    updateOrderStatusFromItems(order);
+    await order.save();
+
+    res.status(200).json({
+      success: true,
+      message: `Item marked as ${status}`
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update item status',
+      error: error.message
+    });
+  }
+};
+
 module.exports = {
   sendToKitchen,
   getKitchenStatus,
-  getPendingItems
+  getPendingItems,
+  updateItemStatus
 };

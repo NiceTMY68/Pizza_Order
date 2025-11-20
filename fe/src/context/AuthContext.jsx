@@ -15,7 +15,6 @@ export const AuthProvider = ({ children }) => {
       try {
         setUser(JSON.parse(supervisorData));
       } catch (error) {
-        console.error('Error parsing supervisor data:', error);
         localStorage.removeItem('token');
         localStorage.removeItem('supervisor');
       }

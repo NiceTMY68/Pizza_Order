@@ -7,7 +7,9 @@ import {
   PaperAirplaneIcon, 
   CreditCardIcon,
   BanknotesIcon,
-  BuildingLibraryIcon
+  BuildingLibraryIcon,
+  CheckCircleIcon,
+  ClockIcon
 } from '@heroicons/react/24/outline';
 import { menuAPI, ordersAPI, kitchenAPI, paymentAPI, tablesAPI } from '../api';
 import { formatCurrency } from '../utils/format';
@@ -52,7 +54,6 @@ const Order = () => {
       }
       return null;
     } catch (error) {
-      console.error('Error fetching order:', error);
       return null;
     }
   };
@@ -78,7 +79,6 @@ const Order = () => {
       
       await fetchOrder();
     } catch (error) {
-      console.error('Error fetching data:', error);
       toast.error('Failed to load data');
     } finally {
       if (showLoading) setLoading(false);
@@ -271,6 +271,34 @@ const Order = () => {
     bank: BuildingLibraryIcon,
   };
 
+  const getItemStatus = (item) => {
+    return item.kitchenStatus || 'pending';
+  };
+
+  const isItemSentToKitchen = (item) => {
+    const status = getItemStatus(item);
+    return status !== 'pending';
+  };
+
+  const getStatusBadge = (status) => {
+    const statusConfig = {
+      pending: { label: 'Pending', color: 'bg-gray-100 text-gray-800 border-gray-300' },
+      sent: { label: 'Sent', color: 'bg-blue-100 text-blue-800 border-blue-300' },
+      cooking: { label: 'Cooking', color: 'bg-orange-100 text-orange-800 border-orange-300' },
+      ready: { label: 'Ready', color: 'bg-green-100 text-green-800 border-green-300' },
+      declined: { label: 'Declined', color: 'bg-red-100 text-red-800 border-red-300' },
+    };
+    return statusConfig[status] || statusConfig.pending;
+  };
+
+  const groupItemsByStatus = (items) => {
+    const pending = items.filter(item => getItemStatus(item) === 'pending');
+    const sent = items.filter(item => isItemSentToKitchen(item));
+    return { pending, sent };
+  };
+
+  const hasPendingItems = order && order.items && order.items.some(item => getItemStatus(item) === 'pending');
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-100">
@@ -406,48 +434,146 @@ const Order = () => {
                 </div>
               ) : (
                 <>
-                  <div className="space-y-3 mb-4 max-h-96 overflow-y-auto">
-                    {order.items.map((item) => {
-                      const menuItem = item.menuItemId || {};
-                      const itemName = menuItem.name || item.name || 'Unknown';
-                      const itemPrice = menuItem.price || item.unitPrice || 0;
-                      const itemTotal = item.totalPrice || (itemPrice * item.quantity);
+                  <div className="space-y-4 mb-4 max-h-96 overflow-y-auto">
+                    {(() => {
+                      const { pending, sent } = groupItemsByStatus(order.items);
                       
                       return (
-                        <div
-                          key={item._id}
-                          className="flex items-center justify-between border-b pb-2"
-                        >
-                          <div className="flex-1">
-                            <div className="font-semibold">
-                              {itemName}
-                              {item.quantity === 0.5 && (
-                                <span className="text-xs text-gray-500 ml-2">(Half)</span>
-                              )}
+                        <>
+                          {/* Pending Items Section */}
+                          {pending.length > 0 && (
+                            <div className="space-y-2">
+                              <div className="flex items-center gap-2 text-sm font-semibold text-gray-700 mb-2">
+                                <ClockIcon className="h-4 w-4" />
+                                <span>Pending ({pending.length})</span>
+                              </div>
+                              {pending.map((item) => {
+                                const menuItem = item.menuItemId || {};
+                                const itemName = menuItem.name || item.name || 'Unknown';
+                                const itemPrice = menuItem.price || item.unitPrice || 0;
+                                const itemTotal = item.totalPrice || (itemPrice * item.quantity);
+                                
+                                return (
+                                  <div
+                                    key={item._id}
+                                    className="flex items-center justify-between border-l-4 border-blue-500 bg-blue-50 rounded-r-lg p-3"
+                                  >
+                                    <div className="flex-1">
+                                      <div className="flex items-center gap-2">
+                                        <div className="font-semibold">
+                                          {itemName}
+                                          {item.quantity === 0.5 && (
+                                            <span className="text-xs text-gray-500 ml-2">(Half)</span>
+                                          )}
+                                        </div>
+                                        <span className={`text-xs px-2 py-0.5 rounded-full border ${getStatusBadge(getItemStatus(item)).color}`}>
+                                          {getStatusBadge(getItemStatus(item)).label}
+                                        </span>
+                                      </div>
+                                      <div className="text-sm text-gray-600">
+                                        {item.quantity === 0.5 ? '0.5' : item.quantity} x {formatCurrency(itemPrice)} = {formatCurrency(itemTotal)}
+                                      </div>
+                                      {item.note && (
+                                        <div className="text-xs text-gray-500">Note: {item.note}</div>
+                                      )}
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-bold">
+                                        {formatCurrency(itemTotal)}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => removeItem(item._id, e)}
+                                        className="text-red-500 hover:text-red-700 p-1 transition-colors"
+                                        title="Remove item"
+                                      >
+                                        <XMarkIcon className="h-5 w-5" />
+                                      </button>
+                                    </div>
+                                  </div>
+                                );
+                              })}
                             </div>
-                            <div className="text-sm text-gray-600">
-                              {item.quantity === 0.5 ? '0.5' : item.quantity} x {formatCurrency(itemPrice)} = {formatCurrency(itemTotal)}
+                          )}
+
+                          {/* Sent to Kitchen Items Section */}
+                          {sent.length > 0 && (
+                            <div className="space-y-2">
+                              <div className="flex items-center gap-2 text-sm font-semibold text-gray-700 mb-2">
+                                <CheckCircleIcon className="h-4 w-4 text-green-600" />
+                                <span>Sent to Kitchen ({sent.length})</span>
+                              </div>
+                              {sent.map((item) => {
+                                const menuItem = item.menuItemId || {};
+                                const itemName = menuItem.name || item.name || 'Unknown';
+                                const itemPrice = menuItem.price || item.unitPrice || 0;
+                                const itemTotal = item.totalPrice || (itemPrice * item.quantity);
+                                const status = getItemStatus(item);
+                                const statusBadge = getStatusBadge(status);
+                                const isLocked = isItemSentToKitchen(item);
+                                
+                                return (
+                                  <div
+                                    key={item._id}
+                                    className={`flex items-center justify-between border-l-4 rounded-r-lg p-3 ${
+                                      status === 'ready' 
+                                        ? 'border-green-500 bg-green-50' 
+                                        : status === 'declined'
+                                        ? 'border-red-500 bg-red-50'
+                                        : 'border-gray-400 bg-gray-50'
+                                    } ${isLocked ? 'opacity-90' : ''}`}
+                                  >
+                                    <div className="flex-1">
+                                      <div className="flex items-center gap-2">
+                                        <div className={`font-semibold ${isLocked ? 'text-gray-600' : ''}`}>
+                                          {itemName}
+                                          {item.quantity === 0.5 && (
+                                            <span className="text-xs text-gray-500 ml-2">(Half)</span>
+                                          )}
+                                        </div>
+                                        <span className={`text-xs px-2 py-0.5 rounded-full border ${statusBadge.color}`}>
+                                          {statusBadge.label}
+                                        </span>
+                                      </div>
+                                      <div className="text-sm text-gray-600">
+                                        {item.quantity === 0.5 ? '0.5' : item.quantity} x {formatCurrency(itemPrice)} = {formatCurrency(itemTotal)}
+                                      </div>
+                                      {item.note && (
+                                        <div className="text-xs text-gray-500">Note: {item.note}</div>
+                                      )}
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-bold">
+                                        {formatCurrency(itemTotal)}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          if (isLocked) {
+                                            toast.warning('Cannot remove items that have been sent to kitchen');
+                                            return;
+                                          }
+                                          removeItem(item._id, e);
+                                        }}
+                                        disabled={isLocked}
+                                        className={`p-1 transition-colors ${
+                                          isLocked 
+                                            ? 'text-gray-400 cursor-not-allowed' 
+                                            : 'text-red-500 hover:text-red-700'
+                                        }`}
+                                        title={isLocked ? 'Item sent to kitchen - cannot remove' : 'Remove item'}
+                                      >
+                                        <XMarkIcon className="h-5 w-5" />
+                                      </button>
+                                    </div>
+                                  </div>
+                                );
+                              })}
                             </div>
-                            {item.note && (
-                              <div className="text-xs text-gray-500">Note: {item.note}</div>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-bold">
-                              {formatCurrency(itemTotal)}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={(e) => removeItem(item._id, e)}
-                              className="text-red-500 hover:text-red-700 p-1"
-                              title="Remove item"
-                            >
-                              <XMarkIcon className="h-5 w-5" />
-                            </button>
-                          </div>
-                        </div>
+                          )}
+                        </>
                       );
-                    })}
+                    })()}
                   </div>
 
                   <div className="border-t pt-4 mb-4">
@@ -464,10 +590,10 @@ const Order = () => {
                       variant="success"
                       className="w-full"
                       onClick={sendToKitchen}
-                      disabled={processing}
+                      disabled={processing || !hasPendingItems}
                     >
                       <PaperAirplaneIcon className="h-4 w-4 mr-1 inline" />
-                      Send to Kitchen
+                      {hasPendingItems ? `Send ${order.items.filter(item => getItemStatus(item) === 'pending').length} Item(s) to Kitchen` : 'No Pending Items'}
                     </Button>
                     <Button
                       variant="primary"
@@ -491,7 +617,7 @@ const Order = () => {
         onClose={() => setShowConfirmModal(false)}
         onConfirm={confirmSendToKitchen}
         title="Confirm"
-        message="Send this order to kitchen?"
+        message={order ? `Send ${order.items.filter(item => getItemStatus(item) === 'pending').length} pending item(s) to kitchen?` : 'Send this order to kitchen?'}
         confirmText="Send"
         cancelText="Cancel"
       />

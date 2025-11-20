@@ -204,7 +204,6 @@ const Tables = () => {
         setTables(response.data);
       }
     } catch (error) {
-      console.error('Error fetching tables:', error);
     } finally {
       setLoading(false);
     }

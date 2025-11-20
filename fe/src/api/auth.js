@@ -14,7 +14,6 @@ export const authAPI = {
     try {
       await apiClient.post('/auth/logout');
     } catch (error) {
-      console.error('Logout error:', error);
     } finally {
       localStorage.removeItem('token');
       localStorage.removeItem('supervisor');
