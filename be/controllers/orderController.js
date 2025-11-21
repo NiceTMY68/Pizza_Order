@@ -2,14 +2,34 @@ const Order = require('../models/Order');
 const Table = require('../models/Table');
 const MenuItem = require('../models/MenuItem');
 
+/**
+ * Kiểm tra quyền truy cập order
+ * Chỉ supervisor tạo order mới có quyền chỉnh sửa
+ * @param {Object} order - Order object
+ * @param {String} supervisorId - ID của supervisor cần kiểm tra
+ * @returns {Boolean} true nếu có quyền, false nếu không
+ */
 const checkOrderPermission = (order, supervisorId) => {
   return order.supervisorId.toString() === supervisorId.toString();
 };
 
+/**
+ * Kiểm tra order có đang ở trạng thái bị khóa không
+ * Các trạng thái bị khóa thường là 'paid', 'cancelled' - không cho phép chỉnh sửa
+ * @param {Object} order - Order object
+ * @param {Array} blockedStatuses - Mảng các trạng thái bị khóa
+ * @returns {Boolean} true nếu bị khóa, false nếu không
+ */
 const isOrderStatusBlocked = (order, blockedStatuses) => {
   return blockedStatuses.includes(order.status);
 };
 
+/**
+ * Populate order với thông tin liên quan từ các collection khác
+ * Lấy thông tin table, supervisor và menu items
+ * @param {Object} order - Order object
+ * @returns {Promise<Object>} Order đã được populate
+ */
 const populateOrder = (order) => {
   return Order.findById(order._id)
     .populate('tableId', 'tableNumber floor type')
@@ -17,20 +37,29 @@ const populateOrder = (order) => {
     .populate('items.menuItemId', 'name category price');
 };
 
+/**
+ * Controller lấy tất cả orders với các filter tùy chọn
+ * Có thể filter theo tableId, supervisorId, hoặc status
+ * Sắp xếp theo thời gian tạo mới nhất trước
+ */
 const getAllOrders = async (req, res) => {
   try {
+    // Lấy các filter từ query parameters
     const { tableId, supervisorId, status } = req.query;
     const query = {};
     
+    // Thêm các filter vào query nếu có
     if (tableId) query.tableId = tableId;
     if (supervisorId) query.supervisorId = supervisorId;
     if (status) query.status = status;
 
+    // Tìm orders với các filter và populate thông tin liên quan
     const orders = await Order.find(query)
       .populate('tableId', 'tableNumber floor type')
       .populate('supervisorId', 'name username')
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 }); // Sắp xếp mới nhất trước
 
+    // Trả về danh sách orders
     res.status(200).json({
       success: true,
       count: orders.length,
@@ -45,13 +74,19 @@ const getAllOrders = async (req, res) => {
   }
 };
 
+/**
+ * Controller lấy thông tin một order theo ID
+ * Populate đầy đủ thông tin table, supervisor và menu items
+ */
 const getOrderById = async (req, res) => {
   try {
+    // Tìm order theo ID và populate thông tin liên quan
     const order = await Order.findById(req.params.id)
       .populate('tableId', 'tableNumber floor type')
       .populate('supervisorId', 'name username')
       .populate('items.menuItemId', 'name category price');
 
+    // Kiểm tra order có tồn tại không
     if (!order) {
       return res.status(404).json({
         success: false,
@@ -59,6 +94,7 @@ const getOrderById = async (req, res) => {
       });
     }
 
+    // Trả về order
     res.status(200).json({
       success: true,
       data: order

@@ -448,51 +448,51 @@ const Order = () => {
                                 <span>Pending ({pending.length})</span>
                               </div>
                               {pending.map((item) => {
-                                const menuItem = item.menuItemId || {};
-                                const itemName = menuItem.name || item.name || 'Unknown';
-                                const itemPrice = menuItem.price || item.unitPrice || 0;
-                                const itemTotal = item.totalPrice || (itemPrice * item.quantity);
-                                
-                                return (
-                                  <div
-                                    key={item._id}
+                      const menuItem = item.menuItemId || {};
+                      const itemName = menuItem.name || item.name || 'Unknown';
+                      const itemPrice = menuItem.price || item.unitPrice || 0;
+                      const itemTotal = item.totalPrice || (itemPrice * item.quantity);
+                      
+                      return (
+                        <div
+                          key={item._id}
                                     className="flex items-center justify-between border-l-4 border-blue-500 bg-blue-50 rounded-r-lg p-3"
-                                  >
-                                    <div className="flex-1">
+                        >
+                          <div className="flex-1">
                                       <div className="flex items-center gap-2">
-                                        <div className="font-semibold">
-                                          {itemName}
-                                          {item.quantity === 0.5 && (
-                                            <span className="text-xs text-gray-500 ml-2">(Half)</span>
-                                          )}
+                            <div className="font-semibold">
+                              {itemName}
+                              {item.quantity === 0.5 && (
+                                <span className="text-xs text-gray-500 ml-2">(Half)</span>
+                              )}
                                         </div>
                                         <span className={`text-xs px-2 py-0.5 rounded-full border ${getStatusBadge(getItemStatus(item)).color}`}>
                                           {getStatusBadge(getItemStatus(item)).label}
                                         </span>
-                                      </div>
-                                      <div className="text-sm text-gray-600">
-                                        {item.quantity === 0.5 ? '0.5' : item.quantity} x {formatCurrency(itemPrice)} = {formatCurrency(itemTotal)}
-                                      </div>
-                                      {item.note && (
-                                        <div className="text-xs text-gray-500">Note: {item.note}</div>
-                                      )}
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                      <span className="font-bold">
-                                        {formatCurrency(itemTotal)}
-                                      </span>
-                                      <button
-                                        type="button"
-                                        onClick={(e) => removeItem(item._id, e)}
+                            </div>
+                            <div className="text-sm text-gray-600">
+                              {item.quantity === 0.5 ? '0.5' : item.quantity} x {formatCurrency(itemPrice)} = {formatCurrency(itemTotal)}
+                            </div>
+                            {item.note && (
+                              <div className="text-xs text-gray-500">Note: {item.note}</div>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold">
+                              {formatCurrency(itemTotal)}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={(e) => removeItem(item._id, e)}
                                         className="text-red-500 hover:text-red-700 p-1 transition-colors"
-                                        title="Remove item"
-                                      >
-                                        <XMarkIcon className="h-5 w-5" />
-                                      </button>
-                                    </div>
-                                  </div>
-                                );
-                              })}
+                              title="Remove item"
+                            >
+                              <XMarkIcon className="h-5 w-5" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
                             </div>
                           )}
 
