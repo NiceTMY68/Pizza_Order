@@ -218,7 +218,7 @@ const createOrder = async (req, res) => {
 
 const updateOrder = async (req, res) => {
   try {
-    const { notes, status } = req.body;
+    const { notes, status, discountType, discountValue, discountReason } = req.body;
     const order = await Order.findById(req.params.id);
 
     if (!order) {
@@ -250,14 +250,60 @@ const updateOrder = async (req, res) => {
         updateData.status = status;
       }
     }
+    // Discount handling
+    if (discountType !== undefined || discountValue !== undefined || discountReason !== undefined) {
+      if (discountType === null || discountType === '') {
+        updateData.discountType = null;
+        updateData.discountValue = 0;
+        updateData.discountReason = '';
+      } else {
+        if (!['percent', 'amount'].includes(discountType)) {
+          return res.status(400).json({
+            success: false,
+            message: 'Invalid discount type'
+          });
+        }
+        const valueNum = Number(discountValue);
+        if (isNaN(valueNum) || valueNum < 0) {
+          return res.status(400).json({
+            success: false,
+            message: 'Discount value must be a non-negative number'
+          });
+        }
+        // Compute subtotal first to validate amount cap
+        order.subtotal = order.items.reduce((sum, item) => sum + item.totalPrice, 0);
+        if (discountType === 'percent') {
+          if (valueNum > 100) {
+            return res.status(400).json({
+              success: false,
+              message: 'Percent discount cannot exceed 100'
+            });
+          }
+        } else if (discountType === 'amount') {
+          if (valueNum > order.subtotal) {
+            return res.status(400).json({
+              success: false,
+              message: 'Amount discount cannot exceed subtotal'
+            });
+          }
+        }
+        updateData.discountType = discountType;
+        updateData.discountValue = valueNum;
+        if (discountReason !== undefined) {
+          updateData.discountReason = discountReason;
+        }
+      }
+    }
 
-    const updatedOrder = await Order.findByIdAndUpdate(
+    let updatedOrder = await Order.findByIdAndUpdate(
       req.params.id,
       updateData,
       { new: true, runValidators: true }
-    )
-      .populate('tableId', 'tableNumber floor type')
-      .populate('supervisorId', 'name username');
+    );
+    // Recalculate totals after discount change
+    updatedOrder.calculateTotal();
+    await updatedOrder.save();
+    updatedOrder = await populateOrder(updatedOrder);
 
     res.status(200).json({
       success: true,
@@ -348,7 +394,8 @@ const getOrdersByTable = async (req, res) => {
 
 const addOrderItem = async (req, res) => {
   try {
-    const { menuItemId, quantity, note } = req.body;
+    const { menuItemId, quantity, note, halves } = req.body;
+    const type = req.body.type || (Array.isArray(halves) && halves.length === 2 ? 'half_half' : 'single');
     const order = await Order.findById(req.params.id);
 
     if (!order) {
@@ -372,32 +419,89 @@ const addOrderItem = async (req, res) => {
       });
     }
 
-    const menuItem = await MenuItem.findById(menuItemId);
-    if (!menuItem) {
-      return res.status(404).json({
-        success: false,
-        message: 'Menu item not found'
+    if (type === 'single') {
+      const menuItem = await MenuItem.findById(menuItemId);
+      if (!menuItem) {
+        return res.status(404).json({
+          success: false,
+          message: 'Menu item not found'
+        });
+      }
+      if (!menuItem.isAvailable) {
+        return res.status(400).json({
+          success: false,
+          message: 'Menu item is not available'
+        });
+      }
+      const unitPrice = menuItem.price;
+      const totalPrice = unitPrice * quantity;
+      order.items.push({
+        type: 'single',
+        menuItemId,
+        name: menuItem.name,
+        quantity,
+        unitPrice,
+        totalPrice,
+        note: note || ''
       });
-    }
-
-    if (!menuItem.isAvailable) {
+    } else if (type === 'half_half') {
+      // half_half
+      const [leftId, rightId] = halves || [];
+      const leftItem = await MenuItem.findById(leftId);
+      const rightItem = await MenuItem.findById(rightId);
+      if (!leftItem || !rightItem) {
+        return res.status(404).json({
+          success: false,
+          message: 'Half-half flavors not found'
+        });
+      }
+      if (!leftItem.isAvailable || !rightItem.isAvailable) {
+        return res.status(400).json({
+          success: false,
+          message: 'One of selected flavors is not available'
+        });
+      }
+      if (!leftItem.supportsHalfHalf || !rightItem.supportsHalfHalf) {
+        return res.status(400).json({
+          success: false,
+          message: 'Selected flavors do not support half-half'
+        });
+      }
+      // Pricing rule: sum of two halves (each 0.5)
+      const leftHalfPrice = leftItem.price * 0.5;
+      const rightHalfPrice = rightItem.price * 0.5;
+      const totalPrice = leftHalfPrice + rightHalfPrice;
+      // Store as a single item with quantity 1
+      order.items.push({
+        type: 'half_half',
+        name: `${leftItem.name} + ${rightItem.name} (Half-Half)`,
+        quantity: 1,
+        unitPrice: totalPrice,
+        totalPrice,
+        halves: [
+          {
+            menuItemId: leftItem._id,
+            name: leftItem.name,
+            unitPrice: leftItem.price,
+            quantity: 0.5,
+            totalPrice: leftHalfPrice
+          },
+          {
+            menuItemId: rightItem._id,
+            name: rightItem.name,
+            unitPrice: rightItem.price,
+            quantity: 0.5,
+            totalPrice: rightHalfPrice
+          }
+        ],
+        note: note || ''
+      });
+    } else {
       return res.status(400).json({
         success: false,
-        message: 'Menu item is not available'
+        message: 'Invalid item type'
       });
     }
-
-    const unitPrice = menuItem.price;
-    const totalPrice = unitPrice * quantity;
-
-    order.items.push({
-      menuItemId,
-      name: menuItem.name,
-      quantity,
-      unitPrice,
-      totalPrice,
-      note: note || ''
-    });
 
     order.calculateTotal();
     await order.save();

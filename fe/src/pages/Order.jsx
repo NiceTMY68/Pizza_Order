@@ -36,6 +36,12 @@ const Order = () => {
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
   const [addingItems, setAddingItems] = useState(new Set());
+  const [showHalfModal, setShowHalfModal] = useState(false);
+  const [halfLeft, setHalfLeft] = useState(null);
+  const [halfRight, setHalfRight] = useState(null);
+  const [discountType, setDiscountType] = useState(null);
+  const [discountValue, setDiscountValue] = useState('');
+  const [discountReason, setDiscountReason] = useState('');
 
   useEffect(() => {
     fetchData(true);
@@ -256,6 +262,7 @@ const Order = () => {
   const filteredMenu = selectedCategory === 'all' 
     ? menuItems 
     : menuItems.filter(item => item.category === selectedCategory);
+  const halfHalfOptions = menuItems.filter(item => item.category === 'pizza' && item.supportsHalfHalf);
 
   const categories = ['all', 'drink', 'pizza', 'pasta'];
   const categoryLabels = {
@@ -295,6 +302,25 @@ const Order = () => {
     const pending = items.filter(item => getItemStatus(item) === 'pending');
     const sent = items.filter(item => isItemSentToKitchen(item));
     return { pending, sent };
+  };
+  
+  const getDiscountPreview = () => {
+    const subtotal = order?.subtotal || 0;
+    if (!discountType || !discountValue) return 0;
+    const val = Number(discountValue);
+    if (isNaN(val) || val <= 0) return 0;
+    if (discountType === 'percent') {
+      const pct = Math.max(0, Math.min(100, val));
+      const raw = (subtotal * pct) / 100;
+      return Math.round(raw * 100) / 100;
+    }
+    return Math.max(0, Math.min(subtotal, val));
+  };
+  
+  const getTotalPreview = () => {
+    const subtotal = order?.subtotal || 0;
+    const disc = getDiscountPreview();
+    return Math.max(0, subtotal - disc);
   };
 
   const hasPendingItems = order && order.items && order.items.some(item => getItemStatus(item) === 'pending');
@@ -353,6 +379,20 @@ const Order = () => {
               </div>
 
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                {(selectedCategory === 'pizza' || selectedCategory === 'all') && (
+                  <div
+                    className="border rounded-lg p-4 hover:shadow-md transition-shadow cursor-pointer bg-blue-50"
+                    onClick={() => {
+                      setHalfLeft(null);
+                      setHalfRight(null);
+                      setShowHalfModal(true);
+                    }}
+                  >
+                    <h3 className="font-semibold mb-2">Pizza Half-Half</h3>
+                    <p className="text-gray-600 mb-3">Select two flavors</p>
+                    <Button variant="primary" size="sm">Choose Flavors</Button>
+                  </div>
+                )}
                 {filteredMenu.map((item) => {
                   const isPizza = item.category === 'pizza';
                   const isAddingFull = addingItems.has(item._id);
@@ -623,6 +663,97 @@ const Order = () => {
       />
 
       <Modal
+        isOpen={showHalfModal}
+        onClose={() => setShowHalfModal(false)}
+        title="Select Half-Half Flavors"
+      >
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <div className="font-semibold mb-2">Left Half</div>
+              <div className="space-y-2 max-h-64 overflow-y-auto">
+                {halfHalfOptions.map((opt) => (
+                  <button
+                    key={`left-${opt._id}`}
+                    onClick={() => setHalfLeft(opt)}
+                    className={`w-full p-3 border rounded-lg text-left transition-all ${halfLeft?._id === opt._id ? 'border-blue-500 bg-blue-50' : 'border-gray-300 hover:border-gray-400'}`}
+                  >
+                    <div className="flex justify-between">
+                      <span>{opt.name}</span>
+                      <span className="text-blue-600 font-medium">{formatCurrency(opt.price * 0.5)}</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <div className="font-semibold mb-2">Right Half</div>
+              <div className="space-y-2 max-h-64 overflow-y-auto">
+                {halfHalfOptions.map((opt) => (
+                  <button
+                    key={`right-${opt._id}`}
+                    onClick={() => setHalfRight(opt)}
+                    className={`w-full p-3 border rounded-lg text-left transition-all ${halfRight?._id === opt._id ? 'border-blue-500 bg-blue-50' : 'border-gray-300 hover:border-gray-400'}`}
+                  >
+                    <div className="flex justify-between">
+                      <span>{opt.name}</span>
+                      <span className="text-blue-600 font-medium">{formatCurrency(opt.price * 0.5)}</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+          <div className="p-3 bg-gray-100 rounded-lg flex justify-between items-center">
+            <div className="font-semibold">Total</div>
+            <div className="text-blue-600 font-bold">
+              {formatCurrency(((halfLeft?.price || 0) + (halfRight?.price || 0)) * 0.5)}
+            </div>
+          </div>
+          <Button
+            variant="primary"
+            className="w-full"
+            disabled={!halfLeft || !halfRight || processing}
+            onClick={async () => {
+              if (!halfLeft || !halfRight) return;
+              const loadingKey = `half_${halfLeft._id}_${halfRight._id}`;
+              if (addingItems.has(loadingKey)) return;
+              setAddingItems(prev => new Set(prev).add(loadingKey));
+              try {
+                let currentOrder = order;
+                if (!currentOrder) {
+                  currentOrder = await createOrder();
+                  if (!currentOrder) {
+                    setAddingItems(prev => {
+                      const s = new Set(prev);
+                      s.delete(loadingKey);
+                      return s;
+                    });
+                    return;
+                  }
+                }
+                const response = await ordersAPI.addHalfHalf(currentOrder._id, halfLeft._id, halfRight._id);
+                if (response.success) {
+                  setOrder(response.data);
+                  setShowHalfModal(false);
+                }
+              } catch (error) {
+                toast.error(error.message || 'Failed to add half-half pizza');
+              } finally {
+                setAddingItems(prev => {
+                  const s = new Set(prev);
+                  s.delete(loadingKey);
+                  return s;
+                });
+              }
+            }}
+          >
+            Add Pizza Half-Half
+          </Button>
+        </div>
+      </Modal>
+
+      <Modal
         isOpen={showPaymentModal}
         onClose={() => setShowPaymentModal(false)}
         title="Select Payment Method"
@@ -648,14 +779,82 @@ const Order = () => {
             );
           })}
           
-          {order && (
-            <div className="mt-4 p-4 bg-gray-100 rounded-lg">
-              <div className="flex justify-between font-bold text-lg">
-                <span>Total:</span>
-                <span>{formatCurrency(order.total || order.subtotal || 0)}</span>
+      {order && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-3 gap-2">
+            <button
+              onClick={() => setDiscountType('percent')}
+              className={`w-full p-3 border rounded-lg transition-all ${
+                discountType === 'percent' ? 'border-blue-500 bg-blue-50' : 'border-gray-300 hover:border-gray-400'
+              }`}
+            >
+              Percent
+            </button>
+            <button
+              onClick={() => setDiscountType('amount')}
+              className={`w-full p-3 border rounded-lg transition-all ${
+                discountType === 'amount' ? 'border-blue-500 bg-blue-50' : 'border-gray-300 hover:border-gray-400'
+              }`}
+            >
+              Amount
+            </button>
+            <button
+              onClick={() => {
+                setDiscountType(null);
+                setDiscountValue('');
+                setDiscountReason('');
+              }}
+              className={`w-full p-3 border rounded-lg transition-all ${
+                discountType === null ? 'border-blue-500 bg-blue-50' : 'border-gray-300 hover:border-gray-400'
+              }`}
+            >
+              No Discount
+            </button>
+          </div>
+          {discountType && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <input
+                  type="number"
+                  value={discountValue}
+                  onChange={(e) => setDiscountValue(e.target.value)}
+                  placeholder={discountType === 'percent' ? 'Enter % (0-100)' : 'Enter amount'}
+                  className="w-full p-3 border rounded-lg"
+                  min="0"
+                  max={discountType === 'percent' ? '100' : undefined}
+                />
+              </div>
+              <div>
+                <input
+                  type="text"
+                  value={discountReason}
+                  onChange={(e) => setDiscountReason(e.target.value)}
+                  placeholder="Reason (optional)"
+                  className="w-full p-3 border rounded-lg"
+                />
               </div>
             </div>
           )}
+          <div className="p-4 bg-gray-100 rounded-lg space-y-2">
+            <div className="flex justify-between">
+              <span className="font-semibold">Subtotal</span>
+              <span>{formatCurrency(order.subtotal || 0)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="font-semibold">Discount</span>
+              <span>
+                {formatCurrency(getDiscountPreview())}
+              </span>
+            </div>
+            <div className="flex justify-between font-bold text-lg">
+              <span>Total</span>
+              <span>
+                {formatCurrency(getTotalPreview())}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
 
           <div className="flex gap-2 mt-4">
             <Button
@@ -668,8 +867,57 @@ const Order = () => {
             <Button
               variant="primary"
               className="flex-1"
-              onClick={handlePayment}
-              disabled={!selectedPaymentMethod || processing}
+          onClick={async () => {
+            if (!selectedPaymentMethod || !order) {
+              if (!selectedPaymentMethod) toast.warning('Please select payment method');
+              return;
+            }
+            const subtotal = order.subtotal || 0;
+            if (discountType === 'percent') {
+              const v = Number(discountValue);
+              if (isNaN(v) || v < 0 || v > 100) {
+                toast.warning('Percent must be between 0 and 100');
+                return;
+              }
+            }
+            if (discountType === 'amount') {
+              const v = Number(discountValue);
+              if (isNaN(v) || v < 0 || v > subtotal) {
+                toast.warning('Amount cannot exceed subtotal');
+                return;
+              }
+            }
+            setProcessing(true);
+            try {
+              if (discountType) {
+                await ordersAPI.update(order._id, {
+                  discountType,
+                  discountValue: Number(discountValue) || 0,
+                  discountReason: discountReason || ''
+                });
+                const refreshed = await ordersAPI.getById(order._id);
+                if (refreshed.success) {
+                  setOrder(refreshed.data);
+                }
+              }
+              const response = await paymentAPI.processPayment(order._id, selectedPaymentMethod);
+              if (response.success) {
+                toast.success('Payment processed successfully');
+                setShowPaymentModal(false);
+                setOrder(null);
+                setDiscountType(null);
+                setDiscountValue('');
+                setDiscountReason('');
+                setSelectedPaymentMethod('');
+                navigate(`/tables?${getNavigateParams()}`);
+              }
+            } catch (error) {
+              toast.error(error.message || 'Payment failed');
+            } finally {
+              setProcessing(false);
+            }
+          }}
+          disabled={!selectedPaymentMethod || processing}
             >
               {processing ? 'Processing...' : 'Confirm'}
             </Button>

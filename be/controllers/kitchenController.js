@@ -171,9 +171,13 @@ const getKitchenStatus = async (req, res) => {
  */
 const getPendingItems = async (req, res) => {
   try {
-    // Tìm tất cả orders đang được xử lý trong bếp
+    // Tìm tất cả orders có items đang cần bếp xử lý,
+    // ưu tiên theo status nhưng vẫn bao phủ trường hợp lệch trạng thái
     const orders = await Order.find({
-      status: { $in: ['sent_to_kitchen', 'cooking'] }
+      $or: [
+        { status: { $in: ['sent_to_kitchen', 'cooking'] } },
+        { 'items.kitchenStatus': { $in: ['pending', 'sent', 'cooking'] } }
+      ]
     })
       .populate('tableId', 'tableNumber floor type')
       .populate('supervisorId', 'name')

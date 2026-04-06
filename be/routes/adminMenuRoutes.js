@@ -6,13 +6,17 @@ const {
   getMenuItemById,
   createMenuItem,
   updateMenuItem,
-  deleteMenuItem
+  deleteMenuItem,
+  getHalfHalfStatus,
+  setHalfHalfStatus
 } = require('../controllers/adminMenuController');
 
 // All routes require admin authentication
 router.use(authenticate);
 
 router.get('/', getAllMenuItems);
+router.get('/pizzas/half-half-status', getHalfHalfStatus);
+router.put('/pizzas/half-half-status', setHalfHalfStatus);
 router.get('/:id', getMenuItemById);
 router.post('/', createMenuItem);
 router.put('/:id', updateMenuItem);

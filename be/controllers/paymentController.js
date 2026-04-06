@@ -50,7 +50,10 @@ const processPayment = async (req, res) => {
       invoiceNumber,
       supervisorId: req.supervisor._id,
       paymentMethod,
-      amount: order.total
+      amount: order.total,
+      discountType: order.discountType,
+      discountValue: order.discountValue,
+      discountAmount: order.discountAmount
     });
 
     order.status = 'paid';
@@ -78,6 +81,9 @@ const processPayment = async (req, res) => {
           invoiceNumber: payment.invoiceNumber,
           paymentMethod: payment.paymentMethod,
           amount: payment.amount,
+          discountType: payment.discountType,
+          discountValue: payment.discountValue,
+          discountAmount: payment.discountAmount,
           paidAt: payment.paidAt
         }
       }
@@ -125,6 +131,11 @@ const getInvoice = async (req, res) => {
           items: order.items,
           subtotal: order.subtotal,
           total: order.total,
+          discount: {
+            type: payment.discountType,
+            value: payment.discountValue,
+            amount: payment.discountAmount
+          },
           paymentMethod: payment.paymentMethod,
           paidAt: payment.paidAt,
           createdAt: order.createdAt

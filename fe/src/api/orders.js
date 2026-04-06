@@ -47,4 +47,12 @@ export const ordersAPI = {
   deleteItem: async (orderId, itemId) => {
     return await apiClient.delete(`/orders/${orderId}/items/${itemId}`);
   },
+  
+  addHalfHalf: async (orderId, leftMenuItemId, rightMenuItemId, note = '') => {
+    return await apiClient.post(`/orders/${orderId}/items`, {
+      type: 'half_half',
+      halves: [leftMenuItemId, rightMenuItemId],
+      note,
+    });
+  },
 };

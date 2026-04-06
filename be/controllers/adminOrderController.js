@@ -168,9 +168,91 @@ const cancelOrder = async (req, res) => {
   }
 };
 
+/**
+ * Admin cập nhật discount cho order
+ */
+const setOrderDiscount = async (req, res) => {
+  try {
+    const { discountType, discountValue, discountReason } = req.body;
+    const order = await Order.findById(req.params.id);
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: 'Order not found'
+      });
+    }
+
+    if (order.status === 'paid' || order.status === 'cancelled') {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot update discount for paid or cancelled order'
+      });
+    }
+
+    if (discountType === null || discountType === '') {
+      order.discountType = null;
+      order.discountValue = 0;
+      order.discountReason = '';
+    } else {
+      if (!['percent', 'amount'].includes(discountType)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid discount type'
+        });
+      }
+      const valueNum = Number(discountValue);
+      if (isNaN(valueNum) || valueNum < 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Discount value must be a non-negative number'
+        });
+      }
+      order.subtotal = order.items.reduce((sum, item) => sum + item.totalPrice, 0);
+      if (discountType === 'percent' && valueNum > 100) {
+        return res.status(400).json({
+          success: false,
+          message: 'Percent discount cannot exceed 100'
+        });
+      }
+      if (discountType === 'amount' && valueNum > order.subtotal) {
+        return res.status(400).json({
+          success: false,
+          message: 'Amount discount cannot exceed subtotal'
+        });
+      }
+      order.discountType = discountType;
+      order.discountValue = valueNum;
+      if (discountReason !== undefined) {
+        order.discountReason = discountReason;
+      }
+    }
+
+    order.calculateTotal();
+    await order.save();
+
+    const populated = await Order.findById(order._id)
+      .populate('tableId', 'tableNumber floor type')
+      .populate('supervisorId', 'name username');
+
+    res.status(200).json({
+      success: true,
+      message: 'Discount updated successfully',
+      data: populated
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update discount',
+      error: error.message
+    });
+  }
+};
+
 module.exports = {
   getAllOrders,
   getOrderById,
-  cancelOrder
+  cancelOrder,
+  setOrderDiscount
 };
 

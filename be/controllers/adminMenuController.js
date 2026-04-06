@@ -190,11 +190,69 @@ const deleteMenuItem = async (req, res) => {
   }
 };
 
+/**
+ * Danh sách pizza và trạng thái supportsHalfHalf
+ */
+const getHalfHalfStatus = async (req, res) => {
+  try {
+    const pizzas = await MenuItem.find({ category: 'pizza' })
+      .select('name supportsHalfHalf isAvailable price')
+      .sort({ name: 1 });
+    const enabled = pizzas.filter(p => p.supportsHalfHalf).length;
+    const disabled = pizzas.length - enabled;
+    res.status(200).json({
+      success: true,
+      count: pizzas.length,
+      summary: { enabled, disabled },
+      data: pizzas
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch half-half status',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Bulk cập nhật supportsHalfHalf cho danh sách pizza
+ */
+const setHalfHalfStatus = async (req, res) => {
+  try {
+    const { ids, value } = req.body;
+    if (!Array.isArray(ids) || typeof value !== 'boolean') {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid payload: ids[] and boolean value are required'
+      });
+    }
+    const result = await MenuItem.updateMany(
+      { _id: { $in: ids }, category: 'pizza' },
+      { $set: { supportsHalfHalf: value } }
+    );
+    res.status(200).json({
+      success: true,
+      message: 'Half-half status updated',
+      matched: result.matchedCount ?? result.nMatched,
+      modified: result.modifiedCount ?? result.nModified
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update half-half status',
+      error: error.message
+    });
+  }
+};
+
 module.exports = {
   getAllMenuItems,
   getMenuItemById,
   createMenuItem,
   updateMenuItem,
-  deleteMenuItem
+  deleteMenuItem,
+  getHalfHalfStatus,
+  setHalfHalfStatus
 };
 

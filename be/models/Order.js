@@ -5,11 +5,18 @@ const mongoose = require('mongoose');
  * Mỗi order có thể có nhiều items (món ăn)
  */
 const orderItemSchema = new mongoose.Schema({
+  // Loại item: single (một vị) hoặc half_half (hai nửa)
+  type: {
+    type: String,
+    enum: ['single', 'half_half'],
+    default: 'single'
+  },
   // ID của menu item (reference đến MenuItem collection)
   menuItemId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'MenuItem',
-    required: true
+    // Chỉ bắt buộc với item loại single
+    required: function() { return this.type === 'single'; }
   },
   // Tên món (lưu lại để tránh phải populate khi hiển thị)
   name: {
@@ -34,6 +41,33 @@ const orderItemSchema = new mongoose.Schema({
     required: true,
     min: [0, 'Total price must be greater than or equal to 0']
   },
+  // Danh sách hai nửa cho pizza half-half
+  halves: [{
+    menuItemId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'MenuItem',
+      required: true
+    },
+    name: {
+      type: String,
+      required: true
+    },
+    unitPrice: {
+      type: Number,
+      required: true,
+      min: [0, 'Unit price must be greater than or equal to 0']
+    },
+    quantity: {
+      type: Number,
+      required: true,
+      min: [0.5, 'Half quantity must be 0.5']
+    },
+    totalPrice: {
+      type: Number,
+      required: true,
+      min: [0, 'Total price must be greater than or equal to 0']
+    }
+  }],
   // Ghi chú đặc biệt cho món (ví dụ: không cay, thêm phô mai)
   note: {
     type: String,
@@ -105,6 +139,25 @@ const orderSchema = new mongoose.Schema({
     default: 0,
     min: [0, 'Total must be greater than or equal to 0']
   },
+  discountType: {
+    type: String,
+    enum: ['percent', 'amount', null],
+    default: null
+  },
+  discountValue: {
+    type: Number,
+    default: 0,
+    min: [0, 'Discount value must be greater than or equal to 0']
+  },
+  discountAmount: {
+    type: Number,
+    default: 0,
+    min: [0, 'Discount amount must be greater than or equal to 0']
+  },
+  discountReason: {
+    type: String,
+    default: ''
+  },
   // Phương thức thanh toán: cash (tiền mặt), card (thẻ), bank (chuyển khoản), null (chưa thanh toán)
   paymentMethod: {
     type: String,
@@ -138,7 +191,17 @@ orderSchema.index({ createdAt: -1 }); // Sắp xếp theo thời gian tạo
  */
 orderSchema.methods.calculateTotal = function() {
   this.subtotal = this.items.reduce((sum, item) => sum + item.totalPrice, 0);
-  this.total = this.subtotal;
+  // Tính discount
+  let discount = 0;
+  if (this.discountType === 'percent') {
+    const percent = Math.max(0, Math.min(100, this.discountValue || 0));
+    const raw = (this.subtotal * percent) / 100;
+    discount = Math.round(raw * 100) / 100;
+  } else if (this.discountType === 'amount') {
+    discount = Math.max(0, Math.min(this.subtotal, this.discountValue || 0));
+  }
+  this.discountAmount = discount;
+  this.total = Math.max(0, this.subtotal - discount);
   return this.total;
 };
 

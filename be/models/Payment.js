@@ -27,6 +27,21 @@ const paymentSchema = new mongoose.Schema({
     required: true,
     min: [0, 'Amount must be greater than or equal to 0']
   },
+  discountType: {
+    type: String,
+    enum: ['percent', 'amount', null],
+    default: null
+  },
+  discountValue: {
+    type: Number,
+    default: 0,
+    min: [0, 'Discount value must be greater than or equal to 0']
+  },
+  discountAmount: {
+    type: Number,
+    default: 0,
+    min: [0, 'Discount amount must be greater than or equal to 0']
+  },
   paidAt: {
     type: Date,
     default: Date.now
