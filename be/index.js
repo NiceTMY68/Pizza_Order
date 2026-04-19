@@ -1,5 +1,5 @@
 // Nạp biến môi trường từ file .env
-require('dotenv').config();
+require('dotenv').config({ override: true });
 const express = require('express');
 const cors = require('cors');
 const connectDB = require('./config/database');

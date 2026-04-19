@@ -20,12 +20,22 @@ const paymentSchema = new mongoose.Schema({
   paymentMethod: {
     type: String,
     required: true,
-    enum: ['cash', 'card', 'bank']
+    enum: ['cash', 'card', 'bank', 'momo']
+  },
+  status: {
+    type: String,
+    enum: ['pending', 'paid', 'failed', 'cancelled'],
+    default: 'paid'
   },
   amount: {
     type: Number,
     required: true,
     min: [0, 'Amount must be greater than or equal to 0']
+  },
+  providerAmount: {
+    type: Number,
+    default: null,
+    min: [0, 'Provider amount must be greater than or equal to 0']
   },
   discountType: {
     type: String,
@@ -42,9 +52,23 @@ const paymentSchema = new mongoose.Schema({
     default: 0,
     min: [0, 'Discount amount must be greater than or equal to 0']
   },
+  momo: {
+    partnerCode: { type: String, default: null },
+    orderId: { type: String, default: null },
+    requestId: { type: String, default: null },
+    transId: { type: String, default: null },
+    resultCode: { type: Number, default: null },
+    message: { type: String, default: null },
+    payUrl: { type: String, default: null },
+    deeplink: { type: String, default: null },
+    qrCodeUrl: { type: String, default: null },
+    responseTime: { type: String, default: null },
+    extraData: { type: String, default: null },
+    signature: { type: String, default: null }
+  },
   paidAt: {
     type: Date,
-    default: Date.now
+    default: null
   }
 }, {
   timestamps: true
@@ -54,6 +78,8 @@ paymentSchema.index({ orderId: 1 });
 paymentSchema.index({ invoiceNumber: 1 });
 paymentSchema.index({ supervisorId: 1 });
 paymentSchema.index({ paidAt: -1 });
+paymentSchema.index({ paymentMethod: 1, status: 1 });
+paymentSchema.index({ 'momo.orderId': 1 });
 
 paymentSchema.statics.generateInvoiceNumber = async function() {
   const count = await this.countDocuments();

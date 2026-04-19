@@ -171,12 +171,12 @@ const getKitchenStatus = async (req, res) => {
  */
 const getPendingItems = async (req, res) => {
   try {
-    // Tìm tất cả orders có items đang cần bếp xử lý,
-    // ưu tiên theo status nhưng vẫn bao phủ trường hợp lệch trạng thái
+    // Tìm các orders có item đã thực sự gửi bếp (sent/cooking)
+    // Không lấy item pending để tránh hiển thị món chưa bấm "Send to Kitchen"
     const orders = await Order.find({
       $or: [
         { status: { $in: ['sent_to_kitchen', 'cooking'] } },
-        { 'items.kitchenStatus': { $in: ['pending', 'sent', 'cooking'] } }
+        { 'items.kitchenStatus': { $in: ['sent', 'cooking'] } }
       ]
     })
       .populate('tableId', 'tableNumber floor type')
@@ -189,8 +189,12 @@ const getPendingItems = async (req, res) => {
     orders.forEach(order => {
       // Duyệt qua từng item trong order
       order.items.forEach(item => {
-        // Chỉ lấy items chưa ready và chưa declined
-        if (!['ready', 'declined'].includes(item.kitchenStatus)) {
+        // Chỉ lấy items đã gửi bếp (sent/cooking) hoặc có timestamp gửi bếp
+        const isSentToKitchen =
+          item.kitchenStatus === 'sent' ||
+          item.kitchenStatus === 'cooking' ||
+          Boolean(item.sentToKitchenAt);
+        if (isSentToKitchen && !['ready', 'declined'].includes(item.kitchenStatus)) {
           pendingItems.push({
             orderId: order._id,
             orderNumber: order.orderNumber,

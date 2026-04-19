@@ -1,15 +1,17 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { 
   ArrowLeftIcon, 
   PlusIcon, 
   XMarkIcon, 
   PaperAirplaneIcon, 
-  CreditCardIcon,
   BanknotesIcon,
-  BuildingLibraryIcon,
+  QrCodeIcon,
   CheckCircleIcon,
-  ClockIcon
+  ClockIcon,
+  ShoppingCartIcon,
+  ArrowUpIcon,
+  ArrowDownIcon
 } from '@heroicons/react/24/outline';
 import { menuAPI, ordersAPI, kitchenAPI, paymentAPI, tablesAPI } from '../api';
 import { formatCurrency } from '../utils/format';
@@ -19,6 +21,7 @@ import Button from '../components/common/Button';
 import Modal from '../components/common/Modal';
 import ConfirmModal from '../components/common/ConfirmModal';
 import Header from '../components/layout/Header';
+import halfHalfPizzaImg from '../assets/half-half-pizza.png';
 
 const Order = () => {
   const { tableId } = useParams();
@@ -42,6 +45,47 @@ const Order = () => {
   const [discountType, setDiscountType] = useState(null);
   const [discountValue, setDiscountValue] = useState('');
   const [discountReason, setDiscountReason] = useState('');
+  const [momoQrUrl, setMomoQrUrl] = useState('');
+  const [momoPayUrl, setMomoPayUrl] = useState('');
+  const [momoPaymentStatus, setMomoPaymentStatus] = useState('idle');
+  const [momoLoading, setMomoLoading] = useState(false);
+  const momoPollingRef = useRef(null);
+  const [showCartModal, setShowCartModal] = useState(false);
+  const categoryRefs = useRef({});
+  const [showAddItemModal, setShowAddItemModal] = useState(false);
+  const [pendingAddItem, setPendingAddItem] = useState(null);
+  const [itemNoteDraft, setItemNoteDraft] = useState('');
+  const [halfHalfNote, setHalfHalfNote] = useState('');
+
+  const scrollToCategory = (cat) => {
+    setSelectedCategory(cat);
+    if (cat === 'all') {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } else if (categoryRefs.current[cat]) {
+      const yOffset = -100; 
+      const element = categoryRefs.current[cat];
+      const y = element.getBoundingClientRect().top + window.scrollY + yOffset;
+      window.scrollTo({ top: y, behavior: 'smooth' });
+    }
+  };
+
+  useEffect(() => {
+    const handleScroll = () => {
+      const scrollPosition = window.scrollY + 150;
+      let activeCat = 'all';
+
+      for (const cat of ['drink', 'pizza', 'pasta']) {
+        const el = categoryRefs.current[cat];
+        if (el && el.offsetTop <= scrollPosition) {
+          activeCat = cat;
+        }
+      }
+      setSelectedCategory(activeCat);
+    };
+
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
 
   useEffect(() => {
     fetchData(true);
@@ -121,7 +165,7 @@ const Order = () => {
     }
   };
 
-  const addItemToOrder = async (menuItemId, quantity = 1, e) => {
+  const addItemToOrder = async (menuItemId, quantity = 1, e, note = '') => {
     if (e) {
       e.preventDefault();
       e.stopPropagation();
@@ -150,7 +194,7 @@ const Order = () => {
         }
       }
 
-      const response = await ordersAPI.addItem(currentOrder._id, menuItemId, quantity);
+      const response = await ordersAPI.addItem(currentOrder._id, menuItemId, quantity, note);
       if (response.success) {
         setOrder(response.data);
       }
@@ -163,6 +207,51 @@ const Order = () => {
         return newSet;
       });
     }
+  };
+
+  const openAddItemNoteModal = (item, quantity = 1, e) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    setPendingAddItem({
+      menuItemId: item._id,
+      name: item.name,
+      quantity
+    });
+    setItemNoteDraft('');
+    setShowAddItemModal(true);
+  };
+
+  const closeAddItemNoteModal = () => {
+    setShowAddItemModal(false);
+    setPendingAddItem(null);
+    setItemNoteDraft('');
+  };
+
+  const confirmAddItemWithNote = async () => {
+    if (!pendingAddItem) return;
+    await addItemToOrder(
+      pendingAddItem.menuItemId,
+      pendingAddItem.quantity,
+      null,
+      itemNoteDraft.trim()
+    );
+    closeAddItemNoteModal();
+  };
+
+  const increasePendingItemQty = () => {
+    setPendingAddItem((prev) => {
+      if (!prev) return prev;
+      return { ...prev, quantity: Math.min(99, (Number(prev.quantity) || 1) + 1) };
+    });
+  };
+
+  const decreasePendingItemQty = () => {
+    setPendingAddItem((prev) => {
+      if (!prev) return prev;
+      return { ...prev, quantity: Math.max(1, (Number(prev.quantity) || 1) - 1) };
+    });
   };
 
   const removeItem = async (itemId, e) => {
@@ -238,27 +327,6 @@ const Order = () => {
     }
   };
 
-  const handlePayment = async () => {
-    if (!selectedPaymentMethod || !order) {
-      if (!selectedPaymentMethod) toast.warning('Please select payment method');
-      return;
-    }
-    setProcessing(true);
-    try {
-      const response = await paymentAPI.processPayment(order._id, selectedPaymentMethod);
-      if (response.success) {
-        toast.success('Payment processed successfully');
-        setShowPaymentModal(false);
-        setOrder(null);
-        navigate(`/tables?${getNavigateParams()}`);
-      }
-    } catch (error) {
-      toast.error(error.message || 'Payment failed');
-    } finally {
-      setProcessing(false);
-    }
-  };
-
   const filteredMenu = selectedCategory === 'all' 
     ? menuItems 
     : menuItems.filter(item => item.category === selectedCategory);
@@ -274,8 +342,82 @@ const Order = () => {
 
   const paymentIcons = {
     cash: BanknotesIcon,
-    card: CreditCardIcon,
-    bank: BuildingLibraryIcon,
+    momo: QrCodeIcon,
+  };
+
+  const stopMomoPolling = () => {
+    if (momoPollingRef.current) {
+      clearInterval(momoPollingRef.current);
+      momoPollingRef.current = null;
+    }
+  };
+
+  const resetMomoState = () => {
+    stopMomoPolling();
+    setMomoQrUrl('');
+    setMomoPayUrl('');
+    setMomoPaymentStatus('idle');
+    setMomoLoading(false);
+  };
+
+  const closePaymentModal = () => {
+    setShowPaymentModal(false);
+    setSelectedPaymentMethod('');
+    resetMomoState();
+  };
+
+  const startMomoPolling = (orderId) => {
+    stopMomoPolling();
+    momoPollingRef.current = setInterval(async () => {
+      try {
+        const statusRes = await paymentAPI.getMomoStatus(orderId);
+        const status = statusRes?.data?.payment?.status;
+        if (status === 'paid') {
+          setMomoPaymentStatus('paid');
+          stopMomoPolling();
+          toast.success('MoMo payment received');
+        } else if (status === 'failed' || status === 'cancelled') {
+          setMomoPaymentStatus('failed');
+          stopMomoPolling();
+        } else if (status === 'pending') {
+          setMomoPaymentStatus('pending');
+        }
+      } catch (error) {
+      }
+    }, 3000);
+  };
+
+  const createMomoQr = async () => {
+    if (!order?._id) return;
+    setMomoLoading(true);
+    try {
+      const response = await paymentAPI.createMomoQr(order._id);
+      if (response.success) {
+        const data = response.data || {};
+        setMomoQrUrl(data.qrCodeUrl || '');
+        setMomoPayUrl(data.payUrl || '');
+        setMomoPaymentStatus('pending');
+        startMomoPolling(order._id);
+      } else {
+        toast.error(response.message || 'Failed to create MoMo QR');
+      }
+    } catch (error) {
+      toast.error(error.message || 'Failed to create MoMo QR');
+      setMomoPaymentStatus('failed');
+    } finally {
+      setMomoLoading(false);
+    }
+  };
+
+  const handleSelectPaymentMethod = async (method) => {
+    setSelectedPaymentMethod(method);
+    if (method === 'momo') {
+      if (!momoQrUrl && !momoPayUrl) {
+        await createMomoQr();
+      }
+      return;
+    }
+    resetMomoState();
   };
 
   const getItemStatus = (item) => {
@@ -304,8 +446,15 @@ const Order = () => {
     return { pending, sent };
   };
   
+  const getPayableSubtotalPreview = () => {
+    if (!order?.items?.length) return 0;
+    return order.items
+      .filter(item => item.kitchenStatus === 'ready')
+      .reduce((sum, item) => sum + (item.totalPrice || 0), 0);
+  };
+
   const getDiscountPreview = () => {
-    const subtotal = order?.subtotal || 0;
+    const subtotal = getPayableSubtotalPreview();
     if (!discountType || !discountValue) return 0;
     const val = Number(discountValue);
     if (isNaN(val) || val <= 0) return 0;
@@ -318,12 +467,24 @@ const Order = () => {
   };
   
   const getTotalPreview = () => {
-    const subtotal = order?.subtotal || 0;
+    const subtotal = getPayableSubtotalPreview();
     const disc = getDiscountPreview();
     return Math.max(0, subtotal - disc);
   };
 
   const hasPendingItems = order && order.items && order.items.some(item => getItemStatus(item) === 'pending');
+
+  useEffect(() => {
+    if (!showPaymentModal && selectedPaymentMethod !== 'momo') {
+      resetMomoState();
+    }
+  }, [showPaymentModal, selectedPaymentMethod]);
+
+  useEffect(() => {
+    return () => {
+      stopMomoPolling();
+    };
+  }, []);
 
   if (loading) {
     return (
@@ -337,320 +498,469 @@ const Order = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-100">
+    <div className="min-h-screen bg-gray-100 pb-20">
       <Header />
       
-      <div className="container mx-auto px-4 py-6">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-800">
-              {table?.type === 'takeaway' 
-                ? table?.tableNumber || 'Take Away'
-                : table?.type === 'pizza_bar'
-                ? 'Pizza Bar'
-                : `Table ${table?.tableNumber || ''}`}
-            </h1>
-            {order && (
-              <p className="text-gray-600">Order: {order.orderNumber}</p>
-            )}
+      <div className="container mx-auto px-4 py-6 flex gap-6 relative items-start">
+        {/* Sidebar Categories (Scrollspy) */}
+        <div className="hidden lg:block w-48 sticky top-24 shrink-0">
+          <div className="bg-white rounded-lg shadow-md p-4 space-y-2">
+            <h3 className="font-bold text-gray-800 mb-3 uppercase tracking-wider text-sm">Categories</h3>
+            <button
+              onClick={() => scrollToCategory('all')}
+              className={`w-full text-left px-4 py-2 rounded-md transition-colors ${
+                selectedCategory === 'all' 
+                  ? 'bg-blue-600 text-white font-medium shadow-sm' 
+                  : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+              }`}
+            >
+              All Menu
+            </button>
+            {['pizza', 'pasta', 'drink'].map((cat) => (
+              <button
+                key={cat}
+                onClick={() => scrollToCategory(cat)}
+                className={`w-full text-left px-4 py-2 rounded-md transition-colors capitalize ${
+                  selectedCategory === cat 
+                    ? 'bg-blue-600 text-white font-medium shadow-sm' 
+                    : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                }`}
+              >
+                {categoryLabels[cat]}
+              </button>
+            ))}
           </div>
-          <Button variant="secondary" onClick={() => navigate(`/tables?${getNavigateParams()}`)}>
-            <ArrowLeftIcon className="h-4 w-4 mr-1 inline" />
-            Back
-          </Button>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2">
-            <div className="bg-white rounded-lg shadow-md p-6">
-              <h2 className="text-2xl font-bold mb-4">Menu</h2>
-              
-              <div className="flex gap-2 mb-4 flex-wrap">
-                {categories.map((cat) => (
-                  <Button
-                    key={cat}
-                    variant={selectedCategory === cat ? 'primary' : 'outline'}
-                    size="sm"
-                    onClick={() => setSelectedCategory(cat)}
-                  >
-                    {categoryLabels[cat]}
-                  </Button>
-                ))}
-              </div>
-
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                {(selectedCategory === 'pizza' || selectedCategory === 'all') && (
-                  <div
-                    className="border rounded-lg p-4 hover:shadow-md transition-shadow cursor-pointer bg-blue-50"
-                    onClick={() => {
-                      setHalfLeft(null);
-                      setHalfRight(null);
-                      setShowHalfModal(true);
-                    }}
-                  >
-                    <h3 className="font-semibold mb-2">Pizza Half-Half</h3>
-                    <p className="text-gray-600 mb-3">Select two flavors</p>
-                    <Button variant="primary" size="sm">Choose Flavors</Button>
-                  </div>
-                )}
-                {filteredMenu.map((item) => {
-                  const isPizza = item.category === 'pizza';
-                  const isAddingFull = addingItems.has(item._id);
-                  const isAddingHalf = addingItems.has(`${item._id}_half`);
-                  
-                  return (
-                    <div
-                      key={item._id}
-                      className="border rounded-lg p-4 hover:shadow-md transition-shadow"
-                    >
-                      <h3 className="font-semibold mb-2">{item.name}</h3>
-                      <p className="text-blue-600 font-bold mb-3">
-                        {formatCurrency(item.price)}
-                      </p>
-                      {isPizza ? (
-                        <div className="flex gap-2">
-                          <Button
-                            size="sm"
-                            variant="primary"
-                            type="button"
-                            disabled={isAddingFull || isAddingHalf}
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              addItemToOrder(item._id, 1, e);
-                            }}
-                            className="flex-1"
-                          >
-                            <PlusIcon className="h-4 w-4 mr-1 inline" />
-                            {isAddingFull ? 'Adding...' : 'Add'}
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            type="button"
-                            disabled={isAddingFull || isAddingHalf}
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              addItemToOrder(item._id, 0.5, e);
-                            }}
-                            className="flex-1"
-                          >
-                            <PlusIcon className="h-4 w-4 mr-1 inline" />
-                            {isAddingHalf ? 'Adding...' : 'Add 1/2'}
-                          </Button>
-                        </div>
-                      ) : (
-                        <Button
-                          size="sm"
-                          variant="primary"
-                          type="button"
-                          disabled={isAddingFull}
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            addItemToOrder(item._id, 1, e);
-                          }}
-                          className="w-full"
-                        >
-                          <PlusIcon className="h-4 w-4 mr-1 inline" />
-                          {isAddingFull ? 'Adding...' : 'Add'}
-                        </Button>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+        {/* Main Menu Area */}
+        <div className="flex-1 w-full max-w-full min-w-0">
+          <div className="flex items-center justify-between mb-6 bg-white p-4 rounded-lg shadow-sm">
+            <div>
+              <h1 className="text-2xl font-bold text-gray-800">
+                {table?.type === 'takeaway' 
+                  ? table?.tableNumber || 'Take Away'
+                  : table?.type === 'pizza_bar'
+                  ? 'Pizza Bar'
+                  : `Table ${table?.tableNumber || ''}`}
+              </h1>
+              {order && (
+                <p className="text-gray-500 text-sm mt-1">Order: {order.orderNumber}</p>
+              )}
             </div>
+            <Button variant="secondary" size="sm" onClick={() => navigate(`/tables?${getNavigateParams()}`)}>
+              <ArrowLeftIcon className="h-4 w-4 mr-1 inline" />
+              Back
+            </Button>
           </div>
 
-          <div className="lg:col-span-1">
-            <div className="bg-white rounded-lg shadow-md p-6 sticky top-4">
-              <h2 className="text-2xl font-bold mb-4">Order</h2>
-              
-              {!order || !order.items || order.items.length === 0 ? (
-                <div className="text-gray-500 text-center py-8">
-                  No items
-                </div>
-              ) : (
-                <>
-                  <div className="space-y-4 mb-4 max-h-96 overflow-y-auto">
-                    {(() => {
-                      const { pending, sent } = groupItemsByStatus(order.items);
-                      
-                      return (
-                        <>
-                          {/* Pending Items Section */}
-                          {pending.length > 0 && (
-                            <div className="space-y-2">
-                              <div className="flex items-center gap-2 text-sm font-semibold text-gray-700 mb-2">
-                                <ClockIcon className="h-4 w-4" />
-                                <span>Pending ({pending.length})</span>
-                              </div>
-                              {pending.map((item) => {
-                      const menuItem = item.menuItemId || {};
-                      const itemName = menuItem.name || item.name || 'Unknown';
-                      const itemPrice = menuItem.price || item.unitPrice || 0;
-                      const itemTotal = item.totalPrice || (itemPrice * item.quantity);
+          <div className="space-y-8">
+            {/* Mobile Categories (Horizontal Scroll) */}
+            <div className="lg:hidden flex gap-2 overflow-x-auto pb-2 scrollbar-hide sticky top-0 z-10 bg-gray-100 py-2">
+              <Button
+                variant={selectedCategory === 'all' ? 'primary' : 'outline'}
+                size="sm"
+                onClick={() => scrollToCategory('all')}
+                className="whitespace-nowrap"
+              >
+                All Menu
+              </Button>
+              {['pizza', 'pasta', 'drink'].map((cat) => (
+                <Button
+                  key={cat}
+                  variant={selectedCategory === cat ? 'primary' : 'outline'}
+                  size="sm"
+                  onClick={() => scrollToCategory(cat)}
+                  className="whitespace-nowrap"
+                >
+                  {categoryLabels[cat]}
+                </Button>
+              ))}
+            </div>
+
+            {/* Sections */}
+            {['pizza', 'pasta', 'drink'].map(cat => {
+              const catItems = menuItems.filter(item => item.category === cat);
+              if (catItems.length === 0 && cat !== 'pizza') return null;
+
+              return (
+                <div 
+                  key={cat} 
+                  ref={el => categoryRefs.current[cat] = el}
+                  className="bg-white rounded-lg shadow-md p-6 scroll-mt-24"
+                >
+                  <h2 className="text-2xl font-bold mb-6 capitalize text-gray-800 border-b pb-2">{categoryLabels[cat]}</h2>
+                  <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
+                    {cat === 'pizza' && (
+                      <div
+                        className="border rounded-lg p-4 hover:shadow-md transition-all cursor-pointer bg-blue-50 flex flex-col h-full hover:-translate-y-1"
+                        onClick={() => {
+                          setHalfLeft(null);
+                          setHalfRight(null);
+                          setHalfHalfNote('');
+                          setShowHalfModal(true);
+                        }}
+                      >
+                        <div className="w-full aspect-[16/9] rounded-md mb-3 overflow-hidden bg-gray-50 shrink-0 shadow-sm">
+                          <img src={halfHalfPizzaImg} alt="Pizza Half-Half" className="w-full h-full object-cover hover:scale-105 transition-transform duration-500" />
+                        </div>
+                        <h3 className="font-semibold mb-2 text-blue-900">Pizza Half-Half</h3>
+                        <p className="text-blue-600/80 mb-3 flex-grow text-sm">Select two flavors</p>
+                        <Button variant="primary" size="sm" className="mt-auto shadow-sm w-full">Choose Flavors</Button>
+                      </div>
+                    )}
+                    {catItems.map((item) => {
+                      const isAddingFull = addingItems.has(item._id);
+                      // Determine aspect ratio based on category
+                      const imageAspectRatioClass = item.category === 'drink' ? 'aspect-[3/4] max-h-48 mx-auto' : 'aspect-[16/9]';
                       
                       return (
                         <div
                           key={item._id}
-                                    className="flex items-center justify-between border-l-4 border-blue-500 bg-blue-50 rounded-r-lg p-3"
+                          className="border rounded-lg p-4 hover:shadow-md transition-all flex flex-col h-full bg-white group hover:-translate-y-1"
                         >
-                          <div className="flex-1">
-                                      <div className="flex items-center gap-2">
-                            <div className="font-semibold">
-                              {itemName}
-                              {item.quantity === 0.5 && (
-                                <span className="text-xs text-gray-500 ml-2">(Half)</span>
-                              )}
-                                        </div>
-                                        <span className={`text-xs px-2 py-0.5 rounded-full border ${getStatusBadge(getItemStatus(item)).color}`}>
-                                          {getStatusBadge(getItemStatus(item)).label}
-                                        </span>
+                          {item.image ? (
+                            <div className={`w-full rounded-md mb-3 overflow-hidden bg-gray-50 shrink-0 shadow-sm ${imageAspectRatioClass}`}>
+                              <img 
+                                src={item.image} 
+                                alt={item.name} 
+                                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                                onError={(e) => {
+                                  e.target.onerror = null;
+                                  e.target.src = 'https://via.placeholder.com/300x200?text=No+Image';
+                                }}
+                              />
                             </div>
-                            <div className="text-sm text-gray-600">
-                              {item.quantity === 0.5 ? '0.5' : item.quantity} x {formatCurrency(itemPrice)} = {formatCurrency(itemTotal)}
+                          ) : (
+                            <div className={`w-full bg-gray-100 rounded-md mb-3 flex items-center justify-center text-gray-400 shrink-0 shadow-inner ${imageAspectRatioClass}`}>
+                              <span className="text-sm">No image</span>
                             </div>
-                            {item.note && (
-                              <div className="text-xs text-gray-500">Note: {item.note}</div>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-bold">
-                              {formatCurrency(itemTotal)}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={(e) => removeItem(item._id, e)}
-                                        className="text-red-500 hover:text-red-700 p-1 transition-colors"
-                              title="Remove item"
-                            >
-                              <XMarkIcon className="h-5 w-5" />
-                            </button>
-                          </div>
+                          )}
+                          <h3 className="font-semibold mb-1 line-clamp-2 text-gray-800" title={item.name}>{item.name}</h3>
+                          <p className="text-blue-600 font-bold mb-3 flex-grow">
+                            {formatCurrency(item.price)}
+                          </p>
+                          <Button
+                            size="sm"
+                            variant="primary"
+                            type="button"
+                            disabled={isAddingFull}
+                            onClick={(e) => {
+                              openAddItemNoteModal(item, 1, e);
+                            }}
+                            className="w-full mt-auto shadow-sm active:scale-95 transition-transform"
+                          >
+                            <PlusIcon className="h-4 w-4 mr-1 inline" />
+                            {isAddingFull ? 'Adding...' : 'Add'}
+                          </Button>
                         </div>
                       );
                     })}
-                            </div>
-                          )}
-
-                          {/* Sent to Kitchen Items Section */}
-                          {sent.length > 0 && (
-                            <div className="space-y-2">
-                              <div className="flex items-center gap-2 text-sm font-semibold text-gray-700 mb-2">
-                                <CheckCircleIcon className="h-4 w-4 text-green-600" />
-                                <span>Sent to Kitchen ({sent.length})</span>
-                              </div>
-                              {sent.map((item) => {
-                                const menuItem = item.menuItemId || {};
-                                const itemName = menuItem.name || item.name || 'Unknown';
-                                const itemPrice = menuItem.price || item.unitPrice || 0;
-                                const itemTotal = item.totalPrice || (itemPrice * item.quantity);
-                                const status = getItemStatus(item);
-                                const statusBadge = getStatusBadge(status);
-                                const isLocked = isItemSentToKitchen(item);
-                                
-                                return (
-                                  <div
-                                    key={item._id}
-                                    className={`flex items-center justify-between border-l-4 rounded-r-lg p-3 ${
-                                      status === 'ready' 
-                                        ? 'border-green-500 bg-green-50' 
-                                        : status === 'declined'
-                                        ? 'border-red-500 bg-red-50'
-                                        : 'border-gray-400 bg-gray-50'
-                                    } ${isLocked ? 'opacity-90' : ''}`}
-                                  >
-                                    <div className="flex-1">
-                                      <div className="flex items-center gap-2">
-                                        <div className={`font-semibold ${isLocked ? 'text-gray-600' : ''}`}>
-                                          {itemName}
-                                          {item.quantity === 0.5 && (
-                                            <span className="text-xs text-gray-500 ml-2">(Half)</span>
-                                          )}
-                                        </div>
-                                        <span className={`text-xs px-2 py-0.5 rounded-full border ${statusBadge.color}`}>
-                                          {statusBadge.label}
-                                        </span>
-                                      </div>
-                                      <div className="text-sm text-gray-600">
-                                        {item.quantity === 0.5 ? '0.5' : item.quantity} x {formatCurrency(itemPrice)} = {formatCurrency(itemTotal)}
-                                      </div>
-                                      {item.note && (
-                                        <div className="text-xs text-gray-500">Note: {item.note}</div>
-                                      )}
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                      <span className="font-bold">
-                                        {formatCurrency(itemTotal)}
-                                      </span>
-                                      <button
-                                        type="button"
-                                        onClick={(e) => {
-                                          if (isLocked) {
-                                            toast.warning('Cannot remove items that have been sent to kitchen');
-                                            return;
-                                          }
-                                          removeItem(item._id, e);
-                                        }}
-                                        disabled={isLocked}
-                                        className={`p-1 transition-colors ${
-                                          isLocked 
-                                            ? 'text-gray-400 cursor-not-allowed' 
-                                            : 'text-red-500 hover:text-red-700'
-                                        }`}
-                                        title={isLocked ? 'Item sent to kitchen - cannot remove' : 'Remove item'}
-                                      >
-                                        <XMarkIcon className="h-5 w-5" />
-                                      </button>
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          )}
-                        </>
-                      );
-                    })()}
                   </div>
-
-                  <div className="border-t pt-4 mb-4">
-                    <div className="flex justify-between text-xl font-bold">
-                      <span>Total:</span>
-                      <span className="text-blue-600">
-                        {formatCurrency(order.total || order.subtotal || 0)}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Button
-                      variant="success"
-                      className="w-full"
-                      onClick={sendToKitchen}
-                      disabled={processing || !hasPendingItems}
-                    >
-                      <PaperAirplaneIcon className="h-4 w-4 mr-1 inline" />
-                      {hasPendingItems ? `Send ${order.items.filter(item => getItemStatus(item) === 'pending').length} Item(s) to Kitchen` : 'No Pending Items'}
-                    </Button>
-                    <Button
-                      variant="primary"
-                      className="w-full"
-                      onClick={() => setShowPaymentModal(true)}
-                      disabled={processing}
-                    >
-                      <CreditCardIcon className="h-4 w-4 mr-1 inline" />
-                      Pay
-                    </Button>
-                  </div>
-                </>
-              )}
-            </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>
+
+      {/* Floating Cart Button */}
+      <button
+        onClick={() => setShowCartModal(true)}
+        className="fixed bottom-6 right-6 lg:bottom-10 lg:right-10 bg-blue-600 text-white p-4 rounded-full shadow-2xl hover:bg-blue-700 hover:scale-105 transition-all z-40 group focus:outline-none focus:ring-4 focus:ring-blue-300"
+        aria-label="Open Order Cart"
+      >
+        <div className="relative">
+          <ShoppingCartIcon className="h-8 w-8" />
+          {order?.items?.length > 0 && (
+            <span className="absolute -top-3 -right-3 bg-red-500 text-white text-xs font-bold w-6 h-6 flex items-center justify-center rounded-full border-2 border-white shadow-sm group-hover:animate-bounce">
+              {order.items.reduce((sum, item) => sum + (item.quantity === 0.5 ? 1 : item.quantity), 0)}
+            </span>
+          )}
+        </div>
+      </button>
+
+      {/* Order Cart Modal */}
+      <Modal
+        isOpen={showCartModal}
+        onClose={() => setShowCartModal(false)}
+        title={
+          <div className="flex items-center gap-2">
+            <ShoppingCartIcon className="h-6 w-6 text-blue-600" />
+            <span>Current Order</span>
+          </div>
+        }
+        size="lg"
+      >
+        <div className="flex flex-col h-[70vh]">
+          {!order || !order.items || order.items.length === 0 ? (
+            <div className="flex-1 flex flex-col items-center justify-center text-gray-500">
+              <ShoppingCartIcon className="h-16 w-16 mb-4 text-gray-300" />
+              <p className="text-lg">Your cart is empty</p>
+              <Button 
+                variant="outline" 
+                className="mt-4"
+                onClick={() => setShowCartModal(false)}
+              >
+                Continue Ordering
+              </Button>
+            </div>
+          ) : (
+            <>
+              <div className="flex-1 overflow-y-auto pr-2 space-y-4 mb-4 scrollbar-thin">
+                {(() => {
+                  const { pending, sent } = groupItemsByStatus(order.items);
+                  
+                  return (
+                    <>
+                      {/* Pending Items Section */}
+                      {pending.length > 0 && (
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2 text-sm font-semibold text-gray-700 mb-2 sticky top-0 bg-white py-2 z-10 border-b">
+                            <ClockIcon className="h-5 w-5 text-orange-500" />
+                            <span>Pending ({pending.length})</span>
+                          </div>
+                          {pending.map((item) => {
+                            const menuItem = item.menuItemId || {};
+                            const itemName = menuItem.name || item.name || 'Unknown';
+                            const itemPrice = menuItem.price || item.unitPrice || 0;
+                            const itemTotal = item.totalPrice || (itemPrice * item.quantity);
+                            
+                            return (
+                              <div
+                                key={item._id}
+                                className="flex items-center justify-between border-l-4 border-orange-400 bg-orange-50/50 hover:bg-orange-50 rounded-r-lg p-3 transition-colors shadow-sm"
+                              >
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <div className="font-semibold text-gray-800">
+                                      {itemName}
+                                      {item.quantity === 0.5 && (
+                                        <span className="text-xs font-normal text-gray-500 ml-2 bg-gray-200 px-2 py-0.5 rounded-full">(Half)</span>
+                                      )}
+                                    </div>
+                                    <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border font-medium ${getStatusBadge(getItemStatus(item)).color}`}>
+                                      {getStatusBadge(getItemStatus(item)).label}
+                                    </span>
+                                  </div>
+                                  <div className="text-sm text-gray-600 font-medium">
+                                    {item.quantity === 0.5 ? '0.5' : item.quantity} × {formatCurrency(itemPrice)} = <span className="text-gray-800">{formatCurrency(itemTotal)}</span>
+                                  </div>
+                                  {item.note && (
+                                    <div className="text-xs text-gray-500 mt-1 italic">Note: {item.note}</div>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-4 pl-4">
+                                  <span className="font-bold text-gray-900">
+                                    {formatCurrency(itemTotal)}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => removeItem(item._id, e)}
+                                    className="text-gray-400 hover:text-red-500 hover:bg-red-50 p-2 rounded-full transition-all"
+                                    title="Remove item"
+                                  >
+                                    <XMarkIcon className="h-5 w-5" />
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {/* Sent to Kitchen Items Section */}
+                      {sent.length > 0 && (
+                        <div className="space-y-2 mt-6">
+                          <div className="flex items-center gap-2 text-sm font-semibold text-gray-700 mb-2 sticky top-0 bg-white py-2 z-10 border-b">
+                            <CheckCircleIcon className="h-5 w-5 text-green-600" />
+                            <span>Sent to Kitchen ({sent.length})</span>
+                          </div>
+                          {sent.map((item) => {
+                            const menuItem = item.menuItemId || {};
+                            const itemName = menuItem.name || item.name || 'Unknown';
+                            const itemPrice = menuItem.price || item.unitPrice || 0;
+                            const itemTotal = item.totalPrice || (itemPrice * item.quantity);
+                            const status = getItemStatus(item);
+                            const statusBadge = getStatusBadge(status);
+                            const isLocked = isItemSentToKitchen(item);
+                            
+                            return (
+                              <div
+                                key={item._id}
+                                className={`flex items-center justify-between border-l-4 rounded-r-lg p-3 transition-colors shadow-sm ${
+                                  status === 'ready' 
+                                    ? 'border-green-500 bg-green-50/50 hover:bg-green-50' 
+                                    : status === 'declined'
+                                    ? 'border-red-500 bg-red-50/50 hover:bg-red-50'
+                                    : 'border-blue-400 bg-blue-50/30 hover:bg-blue-50'
+                                } ${isLocked ? 'opacity-90' : ''}`}
+                              >
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <div className={`font-semibold ${status === 'declined' ? 'line-through text-gray-500' : 'text-gray-800'}`}>
+                                      {itemName}
+                                      {item.quantity === 0.5 && (
+                                        <span className="text-xs font-normal text-gray-500 ml-2 bg-gray-200 px-2 py-0.5 rounded-full">(Half)</span>
+                                      )}
+                                    </div>
+                                    <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border font-medium ${statusBadge.color}`}>
+                                      {statusBadge.label}
+                                    </span>
+                                  </div>
+                                  <div className={`text-sm font-medium ${status === 'declined' ? 'text-gray-400' : 'text-gray-600'}`}>
+                                    {item.quantity === 0.5 ? '0.5' : item.quantity} × {formatCurrency(itemPrice)} = <span className={status === 'declined' ? '' : 'text-gray-800'}>{formatCurrency(itemTotal)}</span>
+                                  </div>
+                                  {item.note && (
+                                    <div className="text-xs text-gray-500 mt-1 italic">Note: {item.note}</div>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-4 pl-4">
+                                  <span className={`font-bold ${status === 'declined' ? 'text-gray-400 line-through' : 'text-gray-900'}`}>
+                                    {formatCurrency(itemTotal)}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      if (isLocked) {
+                                        toast.warning('Cannot remove items that have been sent to kitchen');
+                                        return;
+                                      }
+                                      removeItem(item._id, e);
+                                    }}
+                                    disabled={isLocked}
+                                    className={`p-2 rounded-full transition-all ${
+                                      isLocked 
+                                        ? 'text-gray-300 cursor-not-allowed' 
+                                        : 'text-gray-400 hover:text-red-500 hover:bg-red-50'
+                                    }`}
+                                    title={isLocked ? 'Item sent to kitchen - cannot remove' : 'Remove item'}
+                                  >
+                                    <XMarkIcon className="h-5 w-5" />
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
+
+              <div className="border-t-2 border-gray-100 pt-4 mt-auto shrink-0 bg-white">
+                <div className="flex justify-between items-end mb-4">
+                  <span className="text-gray-600 font-medium">Subtotal:</span>
+                  <div className="text-right">
+                    <div className="text-2xl font-bold text-blue-600">
+                      {formatCurrency(order.total || order.subtotal || 0)}
+                    </div>
+                    {order.items.some(i => getItemStatus(i) === 'declined') && (
+                      <div className="text-xs text-gray-500">
+                        *Declined items are not included
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <Button
+                    variant="success"
+                    className="w-full shadow-sm py-3 text-base"
+                    onClick={() => {
+                      setShowCartModal(false);
+                      sendToKitchen();
+                    }}
+                    disabled={processing || !hasPendingItems}
+                  >
+                    <PaperAirplaneIcon className="h-5 w-5 mr-2 inline" />
+                    {hasPendingItems ? `Send ${order.items.filter(item => getItemStatus(item) === 'pending').length} to Kitchen` : 'Kitchen Updated'}
+                  </Button>
+                  <Button
+                    variant="primary"
+                    className="w-full shadow-sm py-3 text-base"
+                    onClick={() => {
+                      setShowCartModal(false);
+                      setShowPaymentModal(true);
+                    }}
+                    disabled={processing}
+                  >
+                    <QrCodeIcon className="h-5 w-5 mr-2 inline" />
+                    Proceed to Pay
+                  </Button>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={showAddItemModal}
+        onClose={closeAddItemNoteModal}
+        title="Add Note For Item"
+      >
+        <div className="space-y-4">
+          <div className="p-3 bg-gray-50 rounded-lg border">
+            <div className="font-semibold text-gray-800">{pendingAddItem?.name || 'Item'}</div>
+            <div className="text-sm text-gray-600 mt-2 flex items-center justify-between">
+              <span>Quantity</span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={decreasePendingItemQty}
+                  className="p-1 rounded border text-gray-700 hover:bg-gray-100 disabled:opacity-50"
+                  disabled={processing || (pendingAddItem?.quantity || 1) <= 1}
+                  aria-label="Decrease quantity"
+                >
+                  <ArrowDownIcon className="h-4 w-4" />
+                </button>
+                <span className="min-w-8 text-center font-semibold text-gray-800">
+                  {pendingAddItem?.quantity || 1}
+                </span>
+                <button
+                  type="button"
+                  onClick={increasePendingItemQty}
+                  className="p-1 rounded border text-gray-700 hover:bg-gray-100 disabled:opacity-50"
+                  disabled={processing || (pendingAddItem?.quantity || 1) >= 99}
+                  aria-label="Increase quantity"
+                >
+                  <ArrowUpIcon className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">Item note (optional)</label>
+            <textarea
+              value={itemNoteDraft}
+              onChange={(e) => setItemNoteDraft(e.target.value)}
+              placeholder="Example: no ice, less spicy, extra sauce..."
+              className="w-full p-3 border rounded-lg resize-none"
+              rows={3}
+              maxLength={300}
+            />
+          </div>
+          <div className="flex gap-2">
+            <Button
+              variant="secondary"
+              className="flex-1"
+              onClick={closeAddItemNoteModal}
+              disabled={processing}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              className="flex-1"
+              onClick={confirmAddItemWithNote}
+              disabled={processing}
+            >
+              Add To Order
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       <ConfirmModal
         isOpen={showConfirmModal}
@@ -664,7 +974,10 @@ const Order = () => {
 
       <Modal
         isOpen={showHalfModal}
-        onClose={() => setShowHalfModal(false)}
+        onClose={() => {
+          setShowHalfModal(false);
+          setHalfHalfNote('');
+        }}
         title="Select Half-Half Flavors"
       >
         <div className="space-y-6">
@@ -710,6 +1023,16 @@ const Order = () => {
               {formatCurrency(((halfLeft?.price || 0) + (halfRight?.price || 0)) * 0.5)}
             </div>
           </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">Note for this half-half pizza (optional)</label>
+            <textarea
+              value={halfHalfNote}
+              onChange={(e) => setHalfHalfNote(e.target.value)}
+              placeholder="Example: less cheese, no onion..."
+              className="w-full p-3 border rounded-lg resize-none"
+              rows={2}
+            />
+          </div>
           <Button
             variant="primary"
             className="w-full"
@@ -732,10 +1055,16 @@ const Order = () => {
                     return;
                   }
                 }
-                const response = await ordersAPI.addHalfHalf(currentOrder._id, halfLeft._id, halfRight._id);
+                const response = await ordersAPI.addHalfHalf(
+                  currentOrder._id,
+                  halfLeft._id,
+                  halfRight._id,
+                  halfHalfNote.trim()
+                );
                 if (response.success) {
                   setOrder(response.data);
                   setShowHalfModal(false);
+                  setHalfHalfNote('');
                 }
               } catch (error) {
                 toast.error(error.message || 'Failed to add half-half pizza');
@@ -755,8 +1084,9 @@ const Order = () => {
 
       <Modal
         isOpen={showPaymentModal}
-        onClose={() => setShowPaymentModal(false)}
+        onClose={closePaymentModal}
         title="Select Payment Method"
+        size={selectedPaymentMethod === 'momo' ? 'lg' : 'md'}
       >
         <div className="space-y-4">
           {PAYMENT_METHODS.map((method) => {
@@ -764,7 +1094,7 @@ const Order = () => {
             return (
               <button
                 key={method.value}
-                onClick={() => setSelectedPaymentMethod(method.value)}
+                onClick={() => handleSelectPaymentMethod(method.value)}
                 className={`w-full p-4 border-2 rounded-lg text-left transition-all ${
                   selectedPaymentMethod === method.value
                     ? 'border-blue-500 bg-blue-50'
@@ -838,7 +1168,7 @@ const Order = () => {
           <div className="p-4 bg-gray-100 rounded-lg space-y-2">
             <div className="flex justify-between">
               <span className="font-semibold">Subtotal</span>
-              <span>{formatCurrency(order.subtotal || 0)}</span>
+              <span>{formatCurrency(getPayableSubtotalPreview())}</span>
             </div>
             <div className="flex justify-between">
               <span className="font-semibold">Discount</span>
@@ -853,6 +1183,54 @@ const Order = () => {
               </span>
             </div>
           </div>
+
+          {selectedPaymentMethod === 'momo' && (
+            <div className="p-4 border border-pink-200 rounded-lg bg-pink-50">
+              <div className="text-center mb-3">
+                <p className="font-semibold text-gray-800">MoMo QR Payment</p>
+                <p className="text-sm text-gray-600">Scan QR with MoMo app to pay this bill</p>
+              </div>
+              <div className="flex justify-center">
+                {momoQrUrl ? (
+                  <img
+                    src={momoQrUrl}
+                    alt="MoMo QR"
+                    className="w-64 h-64 object-contain border rounded-lg bg-white p-2"
+                  />
+                ) : (
+                  <div className="w-64 h-64 border rounded-lg bg-white p-4 flex items-center justify-center text-center text-sm text-gray-500">
+                    {momoLoading ? 'Creating QR...' : 'QR is not available yet'}
+                  </div>
+                )}
+              </div>
+              {momoPayUrl && (
+                <div className="mt-3 text-center">
+                  <a
+                    href={momoPayUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-blue-600 hover:underline text-sm font-medium"
+                  >
+                    Open MoMo payment link
+                  </a>
+                </div>
+              )}
+              <div className="mt-3 flex items-center justify-between">
+                <span className="text-sm font-medium text-gray-700">
+                  Status: {momoPaymentStatus === 'paid' ? 'Paid' : momoPaymentStatus === 'pending' ? 'Waiting for payment' : momoPaymentStatus === 'failed' ? 'Failed' : 'Not started'}
+                </span>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={momoLoading || processing}
+                  onClick={createMomoQr}
+                >
+                  {momoLoading ? 'Generating...' : 'Regenerate QR'}
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -860,7 +1238,7 @@ const Order = () => {
             <Button
               variant="secondary"
               className="flex-1"
-              onClick={() => setShowPaymentModal(false)}
+              onClick={closePaymentModal}
             >
               Cancel
             </Button>
@@ -872,7 +1250,7 @@ const Order = () => {
               if (!selectedPaymentMethod) toast.warning('Please select payment method');
               return;
             }
-            const subtotal = order.subtotal || 0;
+            const subtotal = getPayableSubtotalPreview();
             if (discountType === 'percent') {
               const v = Number(discountValue);
               if (isNaN(v) || v < 0 || v > 100) {
@@ -900,15 +1278,36 @@ const Order = () => {
                   setOrder(refreshed.data);
                 }
               }
-              const response = await paymentAPI.processPayment(order._id, selectedPaymentMethod);
-              if (response.success) {
+              if (selectedPaymentMethod === 'momo') {
+                if (momoPaymentStatus !== 'paid') {
+                  toast.warning('Please complete MoMo payment before confirm');
+                  return;
+                }
+
+                const paidOrderRes = await ordersAPI.getById(order._id);
+                if (!paidOrderRes.success || paidOrderRes.data?.status !== 'paid') {
+                  toast.warning('Waiting for payment confirmation');
+                  return;
+                }
+
                 toast.success('Payment processed successfully');
-                setShowPaymentModal(false);
+                closePaymentModal();
                 setOrder(null);
                 setDiscountType(null);
                 setDiscountValue('');
                 setDiscountReason('');
-                setSelectedPaymentMethod('');
+                navigate(`/tables?${getNavigateParams()}`);
+                return;
+              }
+
+              const response = await paymentAPI.processPayment(order._id, selectedPaymentMethod);
+              if (response.success) {
+                toast.success('Payment processed successfully');
+                closePaymentModal();
+                setOrder(null);
+                setDiscountType(null);
+                setDiscountValue('');
+                setDiscountReason('');
                 navigate(`/tables?${getNavigateParams()}`);
               }
             } catch (error) {
@@ -917,7 +1316,7 @@ const Order = () => {
               setProcessing(false);
             }
           }}
-          disabled={!selectedPaymentMethod || processing}
+          disabled={!selectedPaymentMethod || processing || momoLoading}
             >
               {processing ? 'Processing...' : 'Confirm'}
             </Button>

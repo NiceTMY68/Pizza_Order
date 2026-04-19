@@ -1,6 +1,7 @@
 const Order = require('../models/Order');
 const Table = require('../models/Table');
 const Supervisor = require('../models/Supervisor');
+const Payment = require('../models/Payment');
 
 /**
  * Lấy danh sách tất cả orders với filter
@@ -187,6 +188,18 @@ const setOrderDiscount = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: 'Cannot update discount for paid or cancelled order'
+      });
+    }
+
+    const hasPendingMomo = await Payment.exists({
+      orderId: order._id,
+      paymentMethod: 'momo',
+      status: 'pending'
+    });
+    if (hasPendingMomo) {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot update discount while MoMo payment is pending'
       });
     }
 

@@ -7,6 +7,14 @@ export const paymentAPI = {
     });
   },
 
+  createMomoQr: async (orderId) => {
+    return await apiClient.post(`/payment/orders/${orderId}/momo/create`);
+  },
+
+  getMomoStatus: async (orderId) => {
+    return await apiClient.get(`/payment/orders/${orderId}/momo/status`);
+  },
+
   getInvoice: async (orderId) => {
     return await apiClient.get(`/payment/orders/${orderId}/invoice`);
   },

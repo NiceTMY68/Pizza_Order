@@ -161,7 +161,7 @@ const orderSchema = new mongoose.Schema({
   // Phương thức thanh toán: cash (tiền mặt), card (thẻ), bank (chuyển khoản), null (chưa thanh toán)
   paymentMethod: {
     type: String,
-    enum: ['cash', 'card', 'bank', null],
+    enum: ['cash', 'card', 'bank', 'momo', null],
     default: null
   },
   // Thời gian thanh toán

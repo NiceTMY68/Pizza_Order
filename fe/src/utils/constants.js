@@ -15,8 +15,7 @@ export const TABLE_STATUS_COLORS = {
 
 export const PAYMENT_METHODS = [
   { value: 'cash', label: 'Cash', icon: '💵' },
-  { value: 'card', label: 'Card', icon: '💳' },
-  { value: 'bank', label: 'Bank Transfer', icon: '🏦' },
+  { value: 'momo', label: 'MoMo QR', icon: '📱' },
 ];
 
 export const MENU_CATEGORIES = {

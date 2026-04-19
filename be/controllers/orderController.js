@@ -1,6 +1,7 @@
 const Order = require('../models/Order');
 const Table = require('../models/Table');
 const MenuItem = require('../models/MenuItem');
+const Payment = require('../models/Payment');
 
 /**
  * Kiểm tra quyền truy cập order
@@ -22,6 +23,15 @@ const checkOrderPermission = (order, supervisorId) => {
  */
 const isOrderStatusBlocked = (order, blockedStatuses) => {
   return blockedStatuses.includes(order.status);
+};
+
+const hasPendingMomoPayment = async (orderId) => {
+  const exists = await Payment.exists({
+    orderId,
+    paymentMethod: 'momo',
+    status: 'pending'
+  });
+  return Boolean(exists);
 };
 
 /**
@@ -242,6 +252,13 @@ const updateOrder = async (req, res) => {
       });
     }
 
+    if (await hasPendingMomoPayment(order._id)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot update order while MoMo payment is pending'
+      });
+    }
+
     const updateData = {};
     if (notes !== undefined) updateData.notes = notes;
     if (status) {
@@ -344,6 +361,13 @@ const deleteOrder = async (req, res) => {
       });
     }
 
+    if (await hasPendingMomoPayment(order._id)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot cancel order while MoMo payment is pending'
+      });
+    }
+
     const table = await Table.findById(order.tableId);
     if (table && table.currentOrderId && table.currentOrderId.toString() === order._id.toString()) {
       const updateData = { currentOrderId: null };
@@ -416,6 +440,13 @@ const addOrderItem = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: 'Cannot add items to paid or cancelled order'
+      });
+    }
+
+    if (await hasPendingMomoPayment(order._id)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot modify order while MoMo payment is pending'
       });
     }
 
@@ -548,6 +579,13 @@ const updateOrderItem = async (req, res) => {
       });
     }
 
+    if (await hasPendingMomoPayment(order._id)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot modify order while MoMo payment is pending'
+      });
+    }
+
     const item = order.items.id(req.params.itemId);
     if (!item) {
       return res.status(404).json({
@@ -633,6 +671,13 @@ const deleteOrderItem = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: 'Cannot delete items from paid or cancelled order'
+      });
+    }
+
+    if (await hasPendingMomoPayment(order._id)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot modify order while MoMo payment is pending'
       });
     }
 
